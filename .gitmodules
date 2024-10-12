@@ -1,0 +1,3 @@
+[submodule "secure-ollama-server"]
+	path = secure-ollama-server
+	url = https://github.com/panoskorovesis/secure-ollama-server.git
