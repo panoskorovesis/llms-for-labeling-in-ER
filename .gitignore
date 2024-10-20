@@ -1,0 +1,14 @@
+# python venv
+.venv/
+
+# python cache
+*.pyc
+
+# hugging face cache
+.cache/
+
+# configuration files
+config.json
+
+# the datasets
+datasets/
