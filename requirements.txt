@@ -1,3 +1,4 @@
 # This is needed due to the bug described in https://pyjedai.readthedocs.io/en/latest/intro.html#install
 pyjedai
 requests==2.32.3
+tqdm==4.66.5
