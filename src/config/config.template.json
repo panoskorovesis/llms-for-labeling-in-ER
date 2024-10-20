@@ -4,5 +4,12 @@
         "username" : "user",
         "password" : "password",
         "port" : 8200
+    },
+    "data-downloader" : {
+        "url-prefix" : "https://github.com/AI-team-UoA/pyJedAI/tree/main/data/ccer",
+        "required_datasets" : ["D1", "D2", "D3", "D4", "D10"]
+    },
+    "blocking" : {
+        "cache_path" : "/path/of/our/choice/.cache"
     }
 }
