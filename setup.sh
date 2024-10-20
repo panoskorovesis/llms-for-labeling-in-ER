@@ -29,5 +29,21 @@ echo "Installing requirements..."
 
 pip install -r requirements.txt
 
+# Delete the datasets folder if it exists
+if [ -d "./datasets" ]; then
+    echo "Removing existing datasets folder..."
+    rm -rf ./datasets
+fi
+
+# Create a new datasets folder
+echo "Creating datasets folder..."
+mkdir datasets
+
+# Set the PYTHONPATH environment variable
+export PYTHONPATH=$PWD
+
+# Finally activate the virtual environment
+source .venv/bin/activate
+
 # Print completion message
 echo "Setup complete!"
