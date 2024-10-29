@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from collections import defaultdict
 
 import pandas as pd
 import pyjedai
@@ -39,6 +40,8 @@ class Blocker:
         self.ground_truth_path = ground_truth_path
         self.csv_separator = csv_separator
         self.verbose = verbose
+        self.dataset_1_path = dataset_1_path
+        self.dataset_2_path = dataset_2_path
 
         self.d1 = self.load_dataset(self.dataset_1_path)
         self.d2 = self.load_dataset(self.dataset_2_path)
@@ -195,24 +198,61 @@ class Blocker:
             print(json.dumps(results, ensure_ascii=True, indent=4))
 
         # Finally return the blocks and the graph
-        return blocks, graph
+        return blocks, graph, data
 
-    def create_final_pairs(self, blocks_1: dict, blocks_2: dict) -> dict:
+    def create_final_pairs(
+        self,
+        blocks_1: dict,
+        data1: pyjedai.datamodel.Data,
+        blocks_2: dict,
+        data2: pyjedai.datamodel.Data,
+    ) -> dict:
         """Create the final paris by keeping common matches only
 
         #TODO: FIND THE ACTUAL CSV IDS BEFORE RUNNING THIS CODE!
         """
-        final_blocks = {}
+
+        # The data object contains dictionaries that maps the original csv ids to the
+        # arbitrary ones found in blocks.
+        # In order to create the pairs with the csv ids, we have to create the reverse of
+        # those dicts
+
+        blocking_id_to_csv_1 = {
+            value: key for key, value in data1._ids_mapping_1.items()
+        }
+        blocking_id_to_csv_2 = {
+            value: key for key, value in data1._ids_mapping_2.items()
+        }
 
         pairs_1 = set()
         for key in blocks_1:
             for value in blocks_1[key]:
-                pairs_1.add((key, value))
+                original_key_id = blocking_id_to_csv_1[key]
+                print(f"Key: {key} -> {original_key_id}")
+
+                original_value_id = blocking_id_to_csv_2[value]
+                print(f"Value: {value} -> {original_value_id}")
+
+                pairs_1.add((original_key_id, original_value_id))
+
+        # Do the same for the new data object
+        blocking_id_to_csv_1 = {
+            value: key for key, value in data2._ids_mapping_1.items()
+        }
+        blocking_id_to_csv_2 = {
+            value: key for key, value in data2._ids_mapping_2.items()
+        }
 
         pairs_2 = set()
         for key in blocks_2:
             for value in blocks_2[key]:
-                pairs_2.add((value, key))
+                original_key_id = blocking_id_to_csv_1[key]
+                original_value_id = blocking_id_to_csv_2[value]
+
+                # NOTE: Here we have to change the order since the documents
+                # are given in opposite order ie the keys are the gt.D2 documents
+                # and the values the gt.D1
+                pairs_2.add((original_value_id, original_key_id))
 
         if self.verbose:
             print(f"Blocks_1 contain: {len(pairs_1)} pairs")
@@ -222,6 +262,32 @@ class Blocker:
         final_pairs = pairs_1 & pairs_2
 
         return final_pairs
+    
+    def organize_save_pairs(self, pairs: list):
+        """Save the pairs in a csv file under the name pairs.json
+
+        The pairs list contains tuples of d1, d2 ids
+        We want to create a dictionary with the d1 attributes as key and
+        a list of items as value.
+        Each item is the d2 attributes of the cadidate found in the original pairs
+        """
+
+        parsed_pairs = defaultdict(list)
+
+        for pair in tqdm(pairs, desc="Parsing pairs", total=len(parsed_pairs)):
+            parsed_pairs[pair[0]].append(pair[1])
+
+        if self.verbose:
+            print('Parsing completed, will save pairs.json')
+
+        # Get the path from d1 but keeping everything except the last /
+        file_path = self.dataset_1_path.rsplit('/', maxsplit=1)[0]
+        file_path += '/pairs.json'
+
+        with open(file_path, 'w') as fp:
+            fp.write(json.dumps(parsed_pairs))
+
+        return parsed_pairs
 
     def run_blocking_workflow(
         self,
@@ -249,7 +315,7 @@ class Blocker:
 
         start_time = time.time()
 
-        stage_1_blocks, stage_1_graph = self.run_blocking(
+        stage_1_blocks, stage_1_graph, stage_1_data = self.run_blocking(
             vectorizer=vectorizer,
             similarity_search=similarity_search,
             top_k=top_k,
@@ -265,7 +331,7 @@ class Blocker:
         # STAGE 2 - BLOCKING WITH D2, D1
         print("Will run blocking workflow 2/2")
 
-        stage_2_blocks, stage_2_graph = self.run_blocking(
+        stage_2_blocks, stage_2_graph, satage_2_data = self.run_blocking(
             vectorizer=vectorizer,
             similarity_search=similarity_search,
             top_k=top_k,
@@ -278,12 +344,17 @@ class Blocker:
             with_entity_matching=with_entity_matching,
         )
 
-        # finally create the final blocks
-        final_blocks = self.create_final_pairs(stage_1_blocks, stage_2_blocks)
+        # Extract the final pairs from the blocks
+        final_pairs = self.create_final_pairs(
+            stage_1_blocks, stage_1_data, stage_2_blocks, satage_2_data
+        )
+
+        # Organize and save the pairs into a csv file
+        final_pairs = self.organize_save_pairs(final_pairs)
 
         end_time = time.time()
 
         if self.verbose:
             print(f"Block Creation Total Time: {(end_time - start_time)} seconds")
 
-        return final_blocks
+        return final_pairs
