@@ -207,10 +207,7 @@ class Blocker:
         blocks_2: dict,
         data2: pyjedai.datamodel.Data,
     ) -> dict:
-        """Create the final paris by keeping common matches only
-
-        #TODO: FIND THE ACTUAL CSV IDS BEFORE RUNNING THIS CODE!
-        """
+        """Create the final paris by keeping common matches only"""
 
         # The data object contains dictionaries that maps the original csv ids to the
         # arbitrary ones found in blocks.
@@ -228,10 +225,8 @@ class Blocker:
         for key in blocks_1:
             for value in blocks_1[key]:
                 original_key_id = blocking_id_to_csv_1[key]
-                print(f"Key: {key} -> {original_key_id}")
 
                 original_value_id = blocking_id_to_csv_2[value]
-                print(f"Value: {value} -> {original_value_id}")
 
                 pairs_1.add((original_key_id, original_value_id))
 
@@ -262,30 +257,116 @@ class Blocker:
         final_pairs = pairs_1 & pairs_2
 
         return final_pairs
-    
-    def organize_save_pairs(self, pairs: list):
+
+    def save_records_of_interest(
+        self,
+        dataset: pd.DataFrame,
+        attributes: list,
+        id_col: str,
+        ids_of_interest: dict,
+        filename: str,
+    ) -> None:
+        """
+        Save records of interest from the given dataset as a dictionary.
+
+        This method converts the input DataFrame into string format and then creates records for ids present in parsed_pairs.
+        The resulting records are saved as a JSON file.
+
+        Args:
+            parsed_pairs (dict): A dictionary where keys are ids and values are lists of related items.
+
+        Returns:
+            None
+        """
+
+        # Convert df into str format
+        str_dataset = dataset.astype(str)
+
+        records = {}
+        for record_id in tqdm(
+            ids_of_interest,
+            desc=f"Constructing records {filename}",
+            total=len(ids_of_interest),
+        ):
+            try:
+                # Get the one record from the dataframe
+                record = str_dataset[str_dataset[id_col] == str(record_id)].iloc[0]
+                # Keep only the columns we are interested in
+                record = list(record[attributes].values)
+                # Join them with " " between them
+                record = " ".join(record)
+                # Save the completed record in the dictionary
+                records[int(record_id)] = record
+            except Exception as e:
+                print(f'Oh no!: {record_id}')
+
+        # Save the dictionary in the same folder as the datasets
+        file_path = self.dataset_1_path.rsplit("/", maxsplit=1)[0]
+        file_path += f"/{filename}"
+
+        with open(file_path, "w") as fp:
+            fp.write(json.dumps(records, indent=4))
+
+        if self.verbose:
+            print(f"Saved {len(records)} records to {file_path}")
+
+    def organize_save_pairs(self, pairs: list) -> list:
         """Save the pairs in a csv file under the name pairs.json
 
         The pairs list contains tuples of d1, d2 ids
         We want to create a dictionary with the d1 attributes as key and
         a list of items as value.
         Each item is the d2 attributes of the cadidate found in the original pairs
+
+        We will also create two files d1_pairs.csv and d2_pairs.csv
+        Those will contain the id as key and the representation of a record as value
+        This will be done for all the records of interest and will be used for the prompting
         """
 
         parsed_pairs = defaultdict(list)
 
+        #NOTE: Here the parsed pairs contain:
+        # Keys: The ids of d1
+        # Values: Lists of ids of d2
+        
+        # Since we will need the unique ids of d2 bellow
+        # we will also save them here
+        ids_of_interest_2 = set()
+
         for pair in tqdm(pairs, desc="Parsing pairs", total=len(parsed_pairs)):
             parsed_pairs[pair[0]].append(pair[1])
+            ids_of_interest_2.add(pair[1])
 
         if self.verbose:
-            print('Parsing completed, will save pairs.json')
+            print("Parsing completed, will save pairs.json")
 
         # Get the path from d1 but keeping everything except the last /
-        file_path = self.dataset_1_path.rsplit('/', maxsplit=1)[0]
-        file_path += '/pairs.json'
+        file_path = self.dataset_1_path.rsplit("/", maxsplit=1)[0]
+        file_path += "/pairs.json"
 
-        with open(file_path, 'w') as fp:
+        with open(file_path, "w") as fp:
             fp.write(json.dumps(parsed_pairs))
+
+        if self.verbose:
+            print("Will construct records for d1 and save them as a dictionary")
+
+        # Save the records of interest for d1
+        # The ids of interest here are the keys of the parsed pairs
+        self.save_records_of_interest(
+            dataset=self.d1,
+            attributes=self.dataset_1_attrs,
+            id_col="id",
+            ids_of_interest=parsed_pairs.keys(),
+            filename="d1_records.json",
+        )
+
+        self.save_records_of_interest(
+            dataset=self.d2,
+            attributes=self.dataset_2_attrs,
+            id_col="id",
+            ids_of_interest=ids_of_interest_2,
+            filename="d2_records.json",
+        )
 
         return parsed_pairs
 
@@ -296,7 +377,7 @@ class Blocker:
         top_k: int,
         similarity_distance: str,
         with_entity_matching: bool = True,
-    ) -> None:
+    ) -> list:
         """Run the full blocking workflow
 
         As discussed with @Papadakis the complete blocking process
