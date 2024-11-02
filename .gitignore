@@ -6,6 +6,7 @@
 
 # hugging face cache
 .cache/
+.embs/
 
 # configuration files
 config.json
