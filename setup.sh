@@ -39,6 +39,15 @@ fi
 echo "Creating datasets folder..."
 mkdir datasets
 
+# pull the dudkdb executable
+wget https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-amd64.zip
+
+# unzip it
+unzip -o duckdb_cli-linux-amd64.zip
+
+# remove the zip
+rm duckdb_cli-linux-amd64.zip
+
 # Set the PYTHONPATH environment variable
 export PYTHONPATH=$PWD
 
