@@ -14,13 +14,15 @@ class Models(Enum):
         MISTRAL_NEMO: The mistral-nemo:latest model
         QWEN_2_5: The qwen2.5:latest model
 
+        # NOTE: There are no QWEN_INSTRUCT, MISTRAL_NEMO
+        
     Methods:
         __str__: Return the appropriate model name
     """
 
-    LLAMA3_1 = 1
-    PHI_3 = 2
-    MISTRAL_NEMO = 4
+    LLAMA3_1_INSTRUCT = 1
+    PHI_3_INSTRUCT = 3
+    MISTRAL_NEMO_INSTRUCT = 4
     QWEN_2_5 = 5
 
     def __str__(self) -> str:
@@ -29,14 +31,14 @@ class Models(Enum):
         Override the __str__ method to return the
         correct name
         """
-        if self.name == "LLAMA3_1":
+        if self.name == "LLAMA3_1_INSTRUCT":
             return "llama3.1:8b-instruct-q5_K_M"
-        elif self.name == "PHI_3":
+        elif self.name == "PHI_3_INSTRUCT":
             return "phi3.5:3.8b-mini-instruct-q8_0"
-        elif self.name == "MISTRAL_NEMO":
+        elif self.name == "MISTRAL_NEMO_INSTRUCT":
             return "mistral-nemo:12b-instruct-2407-q5_K_M"
         elif self.name == "QWEN_2_5":
-            return "qwen2.5:latest"
+            return "qwen2.5:14b"
 
 
 class PromptTypes(Enum):
