@@ -94,7 +94,7 @@ class BruteForce:
             self.con.sql(f"""DROP TABLE IF EXISTS {table_name}""")
 
             if self.verbose:
-                print(f'Table {table_name} was deleted. It will be recreated.')
+                print(f"Table {table_name} was deleted. It will be recreated.")
 
         self.con.sql(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
@@ -103,11 +103,46 @@ class BruteForce:
             result VARCHAR NULL,
             request_status VARCHAR NOT NULL,
             inserted_at DATE NOT NULL,
+            prompt_type VARCHAR NOT NULL,
+            model VARCHAR NOT NULL,
+            run_id VARCHAR NOT NULL,
         );
         """)
 
+    def get_processed_records(self, promt_type: PromptTypes, run_id: str, model: Models) -> set:
+        """Get the processed pairs from duckdb
+
+        We will get the pairs and return them as a set
+        for better indexing.
+        This will allow the code to continue the execution from where
+        it stopped
+
+        Returns
+        -------
+            set: The processed pairs
+        """
+        processed_pairs = set()
+        if promt_type == PromptTypes.MATCHING_PROMPT:
+            pairs = self.con.sql(
+                f"SELECT DISTINCT d1_id, d2_candidates_id FROM results WHERE run_id = '{run_id}' and model = '{str(model)}'"
+            ).fetchall()
+            # REMINDER: The d2_candidates_id is a list but due to the matching it should contain exactly
+            # one item.
+            # Keeping that in mind, let's create the processed_pairs
+            for pair in pairs:
+                # pair[0] : the d1_id
+                # pair[1] : the list of d2_ids
+                # pair[1][0] : the d2_id
+                processed_pairs.add((pair[0], pair[1][0]))
+        else:
+            raise NotImplementedError(
+                f"get_processed_records for {promt_type} is not yet implemented"
+            )
+
+        return processed_pairs
+
     def run_matching(
-        self, temperature: float, num_predict: int = 128, restart=False
+        self, temperature: float, run_id: str, model: Models, num_predict: int = 128, restart=False
     ) -> None:
         """Run the MATCHING method on all the available pairs
 
@@ -127,13 +162,24 @@ class BruteForce:
 
         The restart flag signals that we want to abandon the previous run and start again
         """
-        self.create_db_table_if_needed(table_name="matching_results", force=restart)
+        self.create_db_table_if_needed(table_name="results", force=restart)
+
+        # Get processed records
+        # this method does only matching so we can set this as Matching
+        processed_records = self.get_processed_records(
+            promt_type=PromptTypes.MATCHING_PROMPT, run_id=run_id, model=model
+        )
 
         for d1_id in tqdm(self.pairs, desc="Gathering results"):
             for d2_id in self.pairs[d1_id]:
+                # If it's already processed, skip it
+                if (d1_id, d2_id) in processed_records:
+                    if self.verbose:
+                        print(
+                            f"{(d1_id, d2_id)} has already been processed. Will continue"
+                        )
+                    continue
 
-                #TODO: Skip processed pairs
-                
                 # Get the record texts from the dx_records.json
                 d1_text = self.d1_records[d1_id]
                 d2_text = self.d2_records[d2_id]
@@ -150,18 +196,32 @@ class BruteForce:
                 )
 
                 if self.verbose:
-                    print(f'{d1_id} - {d2_id}: {response}')
+                    print(f"{d1_id} - {d2_id}: {response}")
 
                 # Gather the results by saving them in a duckdb table
-                self.con.execute("""INSERT INTO matching_results (d1_id, d2_candidates_id, result, request_status, inserted_at) VALUES (?, ?, ?, ?, ?)""", [ d1_id, [d2_id], d2_id if response == "yes" else None, str(status), datetime.datetime.now() ])
+                self.con.execute(
+                    """INSERT INTO results (d1_id, d2_candidates_id, result, request_status, inserted_at, prompt_type, model, run_id) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        d1_id,
+                        [d2_id],
+                        d2_id if response == "yes" else None,
+                        str(status),
+                        datetime.datetime.now(),
+                        str(PromptTypes.MATCHING_PROMPT),
+                        str(model),
+                        run_id
+                    ],
+                )
 
     def run(
         self,
         mode: BruteForceMode,
         model: Models,
+        run_id: str,
         temperature: float,
         num_predict: int = 128,
-        restart=False
+        restart=False,
     ):
         """This is the main method that executes the brute force
 
@@ -196,7 +256,13 @@ class BruteForce:
         )
 
         if mode == BruteForceMode.MATCHING:
-            self.run_matching(temperature=temperature, num_predict=num_predict, restart=restart)
+            self.run_matching(
+                temperature=temperature,
+                run_id=run_id,
+                model=model,
+                num_predict=num_predict,
+                restart=restart,
+            )
 
         else:
             raise NotImplementedError(f"Mode: {mode} is not yet implemented!")
