@@ -3,7 +3,7 @@ from typing import Union
 from nltk.tokenize import RegexpTokenizer
 import requests
 
-from src.utils.enums import Models, Prompt, PromptTypes, ValidationStatus
+from src.utils.enums import Models, Prompt, PromptTypes, ValidationStatus, PromptGroups
 
 
 class LLM:
@@ -61,7 +61,7 @@ class LLM:
         This is dependant on the prompt_type
         """
 
-        if prompt_type == PromptTypes.MATCHING_PROMPT:
+        if prompt_type in PromptGroups.MATCHING_GROUP.value:
             if text == "no" or text.startswith("no "):
                 return "no"
             elif text == "yes" or text.startswith("yes "):
@@ -70,8 +70,40 @@ class LLM:
                 raise ValueError(
                     f"Text did not contain expected content for {prompt_type}. Text: {text}"
                 )
+        elif prompt_type in PromptGroups.COMPARING_GROUP.value:
+            # First we have to check of the in case to not mess with the rest
+            if "record a is more likely to refer to the same real world entity" in text:
+                return "record a"
 
-    def validate_response(self, rsp: str, prompt_type: PromptTypes) -> ValidationStatus:
+            elif (
+                "record b is more likely to refer to the same real world entity" in text
+            ):
+                return "record b"
+
+            elif text == "record a" or text == "record b":
+                return text
+            # NOTE: The double space here is because at this step we have replace punkt
+            # with a space
+            elif text.startswith("the answer is record a") or text.startswith(
+                "the answer is  record a"
+            ):
+                return "record a"
+            elif text.startswith("the answer is record b") or text.startswith(
+                "the answer is  record b"
+            ):
+                return "record b"
+            else:
+                raise ValueError(
+                    f"Text did not contain expected content for {prompt_type}. Text: {text}"
+                )
+        else:
+            raise NotImplementedError(
+                f"clean_response() is not implemented for {prompt_type}"
+            )
+
+    def validate_response(
+        self, rsp: str, prompt_type: PromptTypes, max_number: int = None
+    ) -> ValidationStatus:
         """Depending on the prompt type make sure that the rsp is the expected one
 
         The first check is to make sure "response" key is present
@@ -91,7 +123,12 @@ class LLM:
         # First clean the text
         text = self.remove_punctuation(rsp["response"]).lower()
 
-        if prompt_type == PromptTypes.MATCHING_PROMPT:
+        # TODO: REMOVE THIS
+        print(
+            f"------------------RAW RSP---------------------\n{text}\n----------------------------------------------\n\n"
+        )
+
+        if prompt_type in PromptGroups.MATCHING_GROUP.value:
             # Here the expected answers should be "Yes" or "No"
             if (
                 text == "no"
@@ -99,17 +136,61 @@ class LLM:
                 or text.startswith("no ")
                 or text.startswith("yes ")
             ):
-                return ValidationStatus.VALID, self.clean_response(text, prompt_type=prompt_type)
+                return ValidationStatus.VALID, self.clean_response(
+                    text, prompt_type=prompt_type
+                )
             else:
                 if self.verbose:
                     print(f"INVALID for prompt: {prompt_type}. TEXT: {text}")
 
                 return ValidationStatus.INVALID, ""
 
-        # TODO: Continue this
-        raise NotImplementedError(
-            f"Validation for {prompt_type} is not yet implemented!"
-        )
+        # here we are looking for two two things
+        # 1) "record a" or "record b"
+        # This is more frequent in the ONLY ... and nothing else prompt
+        # 2) "the answer is record a" or "the answer is record b"
+        # This is more frequent in the same prompt as the paper
+        elif prompt_type in PromptGroups.COMPARING_GROUP.value:
+            if (
+                text == "record a"
+                or text == "record b"
+                or text.startswith("the answer is record a")
+                or text.startswith("the answer is record b")
+                # NOTE: The double space here is because at this step we have replace punkt
+                # with a space
+                or text.startswith("the answer is  record b")
+                or text.startswith("the answer is  record a")
+                # NOTE: Some answers are also valid but do not contain the required information at the start
+                or "record a is more likely to refer to the same real world entity"
+                in text
+                or "record b is more likely to refer to the same real world entity"
+                in text
+            ):
+                return ValidationStatus.VALID, self.clean_response(text, prompt_type)
+            else:
+                if self.verbose:
+                    print(f"INVALID for prompt: {prompt_type}. TEXT: {text}")
+
+                return ValidationStatus.INVALID, ""
+
+        # TODO: Finish this
+        elif prompt_type in PromptGroups.SELECTING_GROUP.value:
+            """Here the value must be a valid number
+            Normally it should be in [] but the models tend to ignore this command
+            So we want to check THE FIRST WORD
+            """
+            word = text.strip().split(" ")[0]
+
+            try:
+                if int(word) <= max_number:
+                    return ValidationStatus.VALID, int(word)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Validation failed: {e}")
+                return ValidationStatus.INVALID, ""
+
+        else:
+            raise ValueError(f"Prompt Type: {prompt_type} is not Supported!")
 
     def send_request(
         self, prompt: str, temperature: float, num_predict: int = 128
@@ -211,7 +292,13 @@ class LLM:
             return None
 
         # Validate the rsp
-        status, clean_response = self.validate_response(rsp, prompt_type)
+        # For the SELECTING Prompt we need a max_number equal to the number of canditates +1
+        # Because we are counting from 1
+        # We can set this for all records since it's only used in the selecting
+        # This is done to simplify the code
+        status, clean_response = self.validate_response(
+            rsp, prompt_type, max_number=len(candidate_records) + 1
+        )
 
         return status, clean_response
 
