@@ -78,7 +78,7 @@ class Downloader:
             [
                 "mkdir",
                 "-p",
-                f"./datasets/{folder}",
+                f"./er_datasets/{folder}",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -95,7 +95,7 @@ class Downloader:
             [
                 "mv",
                 f"{file_name}",
-                f"./datasets/{folder}/{file_name}",
+                f"./er_datasets/{folder}/{file_name}",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
