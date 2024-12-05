@@ -2,6 +2,50 @@ from enum import Enum
 from typing import Union
 
 
+class SimilarityMetric(Enum):
+    """Enum class for the different supported similarities"""
+
+    COSINE = 1
+    EUCLIDIAN = 2
+
+    def __str__(self) -> str:
+        """Return the distance as a string"""
+        if self.name == "COSINE":
+            return "cosine"
+        elif self.name == "EUCLIDIAN":
+            return "euclidian"
+
+
+class Embedding_Models(Enum):
+    """Enum class for the different supported embeddings models
+
+    Those models can be separated into two categories
+    1) transformers
+    2) sentence transformers
+
+    The second ones are considered better equipped for our job
+    """
+
+    ROBERTA_LARGE = 1
+    QWEN_2_5_7B = 2
+    STELLA_EN = 3
+    EMBER_V1 = 4
+    MINI_LM_V6 = 5
+
+    def __str__(self) -> str:
+        """Return the appropriate model name"""
+        if self.name == "ROBERTA_LARGE":
+            return "xlm-roberta-large"
+        elif self.name == "QWEN_2_5_7B":
+            return "Qwen2.5-7B"
+        elif self.name == "STELLA_EN":
+            return "dunzhang/stella_en_1.5B_v5"
+        elif self.name == "EMBER_V1":
+            return "llmrails/ember-v1"
+        elif self.name == "MINI_LM_V6":
+            return "sentence-transformers/all-MiniLM-L6-v2"
+
+
 class Models(Enum):
     """Enum class for the different models used.
 
@@ -15,15 +59,19 @@ class Models(Enum):
         QWEN_2_5: The qwen2.5:latest model
 
         # NOTE: There are no QWEN_INSTRUCT, MISTRAL_NEMO
-        
+
     Methods:
-        __str__: Return the appropriate model name
+        __str__: Return the     appropriate model name
     """
 
+    LLAMA_3_1_Q8_INSTRUCT = 9
     LLAMA3_1_INSTRUCT = 1
     PHI_3_INSTRUCT = 3
     MISTRAL_NEMO_INSTRUCT = 4
     QWEN_2_5 = 5
+    GEMMA_2 = 6
+    SOLAR = 7
+    GRANITE_CODE = 8
 
     def __str__(self) -> str:
         """Return the appropriate model name
@@ -33,29 +81,42 @@ class Models(Enum):
         """
         if self.name == "LLAMA3_1_INSTRUCT":
             return "llama3.1:8b-instruct-q5_K_M"
+        elif self.name == "LLAMA_3_1_Q8_INSTRUCT":
+            return "llama3.1:8b-instruct-q8_0"
         elif self.name == "PHI_3_INSTRUCT":
             return "phi3.5:3.8b-mini-instruct-q8_0"
         elif self.name == "MISTRAL_NEMO_INSTRUCT":
             return "mistral-nemo:12b-instruct-2407-q5_K_M"
         elif self.name == "QWEN_2_5":
             return "qwen2.5:14b"
+        elif self.name == "GEMMA_2":
+            return "gemma2:9b-instruct-q5_K_M"
+        elif self.name == "SOLAR":
+            return "solar-pro:22b"
+        elif self.name == "GRANITE_CODE":
+            return "granite-code:20b-instruct-8k-q5_K_M"
 
 
 class PromptTypes(Enum):
     # Prompts without examples
     MATCHING_PROMPT = 1
-    COMPARING_PROMPT = 2
-    SELECTION_PROMPT = 3
-    FINETUNED_PROMPT = 4
-
-    # Prompts with examples
-    EASY_EXAMPLES_PROMPT = 5
-    MEDIUM_EXAMPLES_PROMPT = 6
-    HARD_EXAMPLES_PROMPT = 7
-    MIXED_EXAMPLES_PROMPT = 8
+    MATCHING_PROMPT_ONLY = 2
+    COMPARING_PROMPT = 3
+    COMPARING_PROMPT_ONLY = 4
+    SELECTING_PROMPT = 5
+    SELECTING_PROMPT_ONLY = 6
 
     def __str__(self) -> str:
         return self.name
+
+
+class PromptGroups(Enum):
+    MATCHING_GROUP = {PromptTypes.MATCHING_PROMPT, PromptTypes.MATCHING_PROMPT_ONLY}
+    COMPARING_GROUP = {PromptTypes.COMPARING_PROMPT, PromptTypes.COMPARING_PROMPT_ONLY}
+    SELECTING_GROUP = {PromptTypes.SELECTING_PROMPT, PromptTypes.SELECTING_PROMPT_ONLY}
+
+    def __str__(self) -> str:
+        return self.value
 
 
 class ValidationStatus(Enum):
@@ -69,15 +130,17 @@ class ValidationStatus(Enum):
 
     def __str__(self) -> str:
         return self.name
-    
+
+
 class BruteForceMode(Enum):
     # The possible brute force modes
     MATCHING = 1
-    COMPARING = 2
-    SELECTING = 3
+    COMPARING = 3
+    SELECTING = 5
 
     def __str__(self) -> str:
         return self.name
+
 
 class Prompt:
     """This class contains the prompts for the different prompt types."""
@@ -87,25 +150,44 @@ class Prompt:
     # This last part is inspired from DAIL-SQL Code: https://github.com/BeachWang/DAIL-SQL
     # and paper https://arxiv.org/pdf/2308.15363
 
-    # This is the matching prompt from the paper https://arxiv.org/pdf/2405.16884
     prompts = {
+        # This is the matching prompt from the paper https://arxiv.org/pdf/2405.16884
         PromptTypes.MATCHING_PROMPT: """Do the two entity records refer to the same real-world entity?
-Answer "Yes" if they do and "No" if they do not.
-Record 1: RECORD_PLACEHOLDER
-Record 2: RECORD_OPTION_PLACEHOLDER_1
-""",
+        Answer "Yes" if they do and "No" if they do not.
+        Record 1: RECORD_PLACEHOLDER
+        Record 2: RECORD_OPTION_PLACEHOLDER_1
+        """,
+        # This is our enhanced version of this prompt. We use the"ONLY" keywords to restrict the
+        # model's responces
+        # We have also added The answer is: (Inspired from DAIL-SQL: https://arxiv.org/abs/2308.15363)
+        PromptTypes.MATCHING_PROMPT_ONLY: """Do the two entity records refer to the same real-world entity?
+        Answer ONLY "Yes" if they do and ONLY "No" if they do not.
+        Record 1: RECORD_PLACEHOLDER
+        Record 2: RECORD_OPTION_PLACEHOLDER_1
+
+        The answer is:
+        """,
         # This os the comparing prompt from the paper https://arxiv.org/pdf/2405.16884
         PromptTypes.COMPARING_PROMPT: """Which of the following two records is more likely to refer to the same real-world entity as the given record? Answer with the corresponding record identifier "Record A" or "Record B"
         Given entity record: RECORD_PLACEHOLDER
         Record A: RECORD_OPTION_PLACEHOLDER_1
+        Record B: RECORD_OPTION_PLACEHOLDER_2 
+        """,
+        # This is our enhanced version of this prompt. We use the"ONLY", "and nothing else" keywords to restrict the
+        # model's responces
+        PromptTypes.COMPARING_PROMPT_ONLY: """Which of the following two records is more likely to refer to the same real-world entity as the given record? Answer ONLY with the corresponding record identifier "Record A" or "Record B" and nothing else.
+        Given entity record: RECORD_PLACEHOLDER
+        Record A: RECORD_OPTION_PLACEHOLDER_1
         Record B: RECORD_OPTION_PLACEHOLDER_2
-
-        The Answer is:""",
-        # This is the selection prompt from the paper https://arxiv.org/pdf/2405.16884
-        PromptTypes.SELECTION_PROMPT: """
+        
+        The answer is: 
+        """,
+        # This is the SELECTING prompt from the paper https://arxiv.org/pdf/2405.16884
+        PromptTypes.SELECTING_PROMPT: """
         Select a record from the following candidates that refers to the same real-world entity as the given record. Answer with the corresponding record number surrounded by "[]" or "[0]" if there is none.
         Given entity record: RECORD_PLACEHOLDER
         """,
+        # TODO: SELECTING_PROMPT ONLY
     }
 
     @classmethod
@@ -136,7 +218,7 @@ Record 2: RECORD_OPTION_PLACEHOLDER_1
         prompt = cls.get_prompt(prompt_type=prompt_type)
 
         # If it's the MATCHING
-        if prompt_type == PromptTypes.MATCHING_PROMPT:
+        if prompt_type in PromptGroups.MATCHING_GROUP.value:
             # The record options must have a size of 1
             assert (
                 len(candidate_records) == 1
@@ -148,7 +230,7 @@ Record 2: RECORD_OPTION_PLACEHOLDER_1
             return prompt
 
         # If it's the comparing prompt
-        elif prompt_type == PromptTypes.COMPARING_PROMPT:
+        elif prompt_type in PromptGroups.COMPARING_GROUP.value:
             # The record options must have a size of 2
             assert (
                 len(candidate_records) == 2
@@ -160,14 +242,13 @@ Record 2: RECORD_OPTION_PLACEHOLDER_1
                 .replace("RECORD_OPTION_PLACEHOLDER_2", candidate_records[1])
             )
 
-        # If it's the SELECTION
-        if prompt_type == PromptTypes.SELECTION_PROMPT:
+            return prompt
+
+        # If it's the SELECTING
+        if prompt_type == PromptTypes.SELECTING_PROMPT:
             prompt = prompt.replace("RECORD_PLACEHOLDER", record)
             # Add the record options
             for idx, record_option in enumerate(candidate_records):
-                prompt += f"[{idx}] {record_option}\n"
-
-            # Finally add the Answer is
-            prompt += "\n The Answer is:"
+                prompt += f"[{idx + 1}] {record_option}\n"
 
             return prompt
