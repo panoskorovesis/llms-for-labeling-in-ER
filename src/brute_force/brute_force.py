@@ -1,5 +1,6 @@
 import datetime
 import json
+import subprocess
 from typing import Union
 
 import duckdb
@@ -30,6 +31,7 @@ class BruteForce:
         self,
         config_path: str,
         pairs_path: str,
+        restart_script_path: str,
         d1_records_path: str,
         d2_records_path: str,
         ground_truth_path: str,
@@ -45,6 +47,12 @@ class BruteForce:
         It will also need the gt to calculate statistics at the end
         """
         self.config = load_config(config_path=config_path)
+
+        self.restart_script_path = restart_script_path
+        # make sure it contains the executable
+        assert self.restart_script_path.endswith(
+            "restart_ollama_with_gpu.sh"
+        ), f"Please provide the path WITH the script"
 
         # Load the jsons
         with open(d1_records_path, "r") as fp:
@@ -88,6 +96,25 @@ class BruteForce:
             )
 
         return con
+
+    def restart_ollama_server(self) -> None:
+        """Restart the ollama server
+
+        This is needed in cases where the model bugs and keeps answering wrong
+        Restart will be performed by the subprocess library
+        It will be used to execute a bash script
+        """
+        print("Will restart the ollama server")
+        results = subprocess.Popen(
+            f"bash {self.restart_script_path}", shell=True, stdout=subprocess.PIPE
+        )
+        # wait the script completion
+        results.wait()
+
+        if self.verbose:
+            print(results.stdout)
+
+        print("Restart completed, will continue")
 
     def validate_prompt(self, mode: BruteForceMode, prompt_type: PromptTypes):
         """Make sure the given prompt_type is compatible with the mode
@@ -303,6 +330,13 @@ class BruteForce:
                 if self.verbose:
                     print(f"{d1_id} - {d2_id}: {response} | {status}")
 
+                # TODO: Change this if needed
+                # ATM restart will only take place if the model is PHI
+                # and the status is invalid
+                # This was done as invalid answers in D3 dataset cause ALL The following to also be invalid
+                if model == Models.PHI_3_INSTRUCT and status != ValidationStatus.VALID:
+                    self.restart_ollama_server()
+
                 # Gather the results by saving them in a duckdb table
                 self.con.execute(
                     """INSERT INTO results (d1_id, d2_candidates_id, result, request_status, inserted_at, prompt_type, model, run_id)
@@ -453,8 +487,7 @@ class BruteForce:
         3) Apply selecting to find the final answer
         """
 
-        # TODO: Replace this with best prompt
-        OPTIMAL_MATCHING_PROMPT = PromptTypes.MATCHING_PROMPT
+        OPTIMAL_MATCHING_PROMPT = PromptTypes.MATCHING_PROMPT_ONLY
 
         # for the matching step we will select the best performing prompt
         self.validate_prompt(
@@ -602,7 +635,7 @@ class BruteForce:
             # Else set it by hand
             # TODO: Make sure this does not disturb validation
             else:
-                status, response = ValidationStatus.VALID, '0'
+                status, response = ValidationStatus.VALID, "0"
 
             # NOTE: Here we dont have to explicitly check for VALID or INVALID
             if self.verbose:
@@ -612,9 +645,10 @@ class BruteForce:
             # They were given incremental IDS in the prompt so we will get the
             # one at response - 1
             selected = None
-            if status == ValidationStatus.VALID and response != '0':
+            if status == ValidationStatus.VALID and response != "0":
                 selected = candidate_pairs[int(response) - 1]
-
+            else:
+                pass
 
             # Gather the results by saving them in a duckdb table
             self.add_results_to_db(
@@ -656,7 +690,7 @@ class BruteForce:
 
         MATCHING:
             This is the simplest mode. We take all pairs and ask the model for each one
-            #TODO: Complete this description based on email answer
+            #TODO: Complete this description
 
         Arguments
         ---------
