@@ -2,6 +2,7 @@ import time
 from typing import Union
 from nltk.tokenize import RegexpTokenizer
 import requests
+import tiktoken
 
 from src.utils.enums import Models, Prompt, PromptTypes, ValidationStatus, PromptGroups
 
@@ -118,12 +119,11 @@ class LLM:
         """
 
         if rsp.get("response") is None:
-            return ValidationStatus.NO_RESPONSE
+            return ValidationStatus.NO_RESPONSE, ""
 
         # First clean the text
         text = self.remove_punctuation(rsp["response"]).lower()
 
-        # TODO: REMOVE THIS
         print(
             f"------------------RAW RSP---------------------\n{text}\n----------------------------------------------\n\n"
         )
@@ -173,7 +173,6 @@ class LLM:
 
                 return ValidationStatus.INVALID, ""
 
-        # TODO: Finish this
         elif prompt_type in PromptGroups.SELECTING_GROUP.value:
             """Here the value must be a valid number
             Normally it should be in [] but the models tend to ignore this command
@@ -184,6 +183,10 @@ class LLM:
             try:
                 if int(word) <= max_number:
                     return ValidationStatus.VALID, int(word)
+                # Answer is out of bounds
+                else: 
+                    print(f'Answer OUT OF BOUNDS. Total Options: {max_number}. Answer: {word}')
+                    return ValidationStatus.INVALID, ""
             except Exception as e:
                 if self.verbose:
                     print(f"Validation failed: {e}")
@@ -219,7 +222,6 @@ class LLM:
 
         auth = (self.username, self.password)
 
-        # TODO: Parameter tunning such as temperature
         # From
         # 1) https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion
         # 2) https://github.com/ollama/ollama/blob/main/docs/modelfile.md#valid-parameters-and-values
@@ -258,6 +260,42 @@ class LLM:
         # if we reach this point, we have failed to send the request
         return None
 
+    def truncate_prompt_if_needed(self, text: str, max_tokens: int = 2048):
+        """If the prompt exeeds the maximum tokens then we will truncate it
+
+        To get an estimation of the tokens we will use tiktoken package
+        We will add 10% to the tokens returned by this package, in order to be sure
+        We will also use gpt-4 as a reference model
+        """
+        # create the encoder
+        encoder = tiktoken.encoding_for_model(model_name="gpt-4")
+        # count the tokens
+        tokens = encoder.encode(text)
+
+        if self.verbose:
+            print(f"@@@@ TOTAL TOKENS: {len(tokens)}")
+
+        # if they are > max truncate
+        # We will keep max_tokens - 300 just to be safe
+        # We will also keep the last 100 tokens as they may contain important information
+        if len(tokens) > max_tokens:
+            if self.verbose:
+                print(
+                    f"Prompt has {len(tokens)} tokens! We will keep: {max_tokens - 200}"
+                )
+
+            tokens_to_keep = max_tokens - 700
+            # Truncate, keeping the last 100
+            truncated_tokens = tokens[:tokens_to_keep] + tokens[-100:]
+
+            if self.verbose:
+                print(f"Remaining tokens: {len(truncated_tokens)}")
+
+            # Decode the tokens back into text
+            text = encoder.decode(truncated_tokens)
+
+        return text
+
     def ask_llm(
         self,
         prompt_type: PromptTypes,
@@ -265,6 +303,7 @@ class LLM:
         candidate_records: list,
         temperature: float,
         num_predict: int = 128,
+        max_tokens=2048,
     ) -> Union[str, None]:
         """Ask the llm using a specific prompt, return the rsp if it's valid else None"""
 
@@ -275,6 +314,15 @@ class LLM:
         prompt = Prompt.add_records_to_prompt(
             prompt_type=prompt_type, record=record, candidate_records=candidate_records
         )
+
+        # If the prompt size is bigger than the max then we have to truncate
+        # Reminder: Default size is 2048 tokens
+        # To be sure, since we are using an estimation we will compromize to max - 200
+        # This will only be applied if the user requested the max tokens or more
+        if max_tokens >= 2048:
+            max_tokens = 1848
+
+        prompt = self.truncate_prompt_if_needed(prompt, max_tokens=max_tokens)
 
         if self.verbose:
             print(f"{self.model} Will be asked:\n{prompt}")
@@ -292,12 +340,11 @@ class LLM:
             return None
 
         # Validate the rsp
-        # For the SELECTING Prompt we need a max_number equal to the number of canditates +1
-        # Because we are counting from 1
+        # For the SELECTING Prompt we need a max_number equal to the number of canditates
         # We can set this for all records since it's only used in the selecting
         # This is done to simplify the code
         status, clean_response = self.validate_response(
-            rsp, prompt_type, max_number=len(candidate_records) + 1
+            rsp, prompt_type, max_number=len(candidate_records)
         )
 
         return status, clean_response
