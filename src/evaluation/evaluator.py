@@ -27,6 +27,9 @@ class Evaluator:
         self.verbose = verbose
         self.csv_separator = csv_separator
         self.to_csv = to_csv
+        # This will be set to False after writing to the csv
+        # It's used to avoid having multiple headers
+        self.first_file_write = True
 
         # Load connections and files
         # We know the results.duckdb database file is in the same folder as gt
@@ -193,6 +196,12 @@ class Evaluator:
             "F1": 2 * float(TP) / (2 * TP + FP + FN) if (TP + FP + FN) != 0 else 0.0,
         }
 
+        # Convert the metrics to percentages
+        metrics["Accuracy"] *= 100
+        metrics["F1"] *= 100
+        metrics["Precision"] *= 100
+        metrics["Recall"] *= 100
+
         if self.verbose:
             print(f"TOTAL in GT: {len(self.gt_pairs)}\nTP: {TP}\nFP: {FP}\nFN: {FN}\n")
 
@@ -219,27 +228,34 @@ class Evaluator:
         print("***************************************")
         print("***************************************\n\n")
 
-    def save_report(self, model: Models, prompt_type: PromptTypes, run_id: str, metrics: dict, elapsed_time: dict):
-        """Crete a dataframe with the given information and then save to the csv file
-        """
-        data = {
-            "Model" : str(model),
-            "Prompt Type" : prompt_type,
-            "Run ID" : run_id
-        }
+    def save_report(
+        self,
+        model: Models,
+        prompt_type: PromptTypes,
+        run_id: str,
+        metrics: dict,
+        elapsed_time: dict,
+    ):
+        """Crete a dataframe with the given information and then save to the csv file"""
+        data = {"Model": str(model), "Prompt Type": prompt_type, "Run ID": run_id}
 
         # Add the two additional dictionaries
         data.update(elapsed_time)
         data.update(metrics)
 
         df = pd.DataFrame(data, index=[0])
-        
+
         if self.verbose:
             print(df.head())
-            print('Will be written to the evaluation csv')
+            print("Will be written to the evaluation csv")
 
         # Mode is always 'a' as the file is created once when the class is initialized
-        df.to_csv(self.csv_path, index=False, mode='a', sep='|')
+        # if its the first time include the headers
+        if self.first_file_write:
+            df.to_csv(self.csv_path, index=False, mode="a", sep="|")
+            self.first_file_write = False
+        else:
+            df.to_csv(self.csv_path, index=False, mode="a", sep="|", header=False)
 
         return
 
