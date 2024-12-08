@@ -6,6 +6,7 @@ import json
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+from pprint import pprint
 
 
 class SimilarityCalculator:
@@ -22,11 +23,13 @@ class SimilarityCalculator:
         ground_truth_path: str,
         verbose: bool = False,
         csv_separator: str = "|",
+        to_csv=False,
     ) -> None:
         """The constructor"""
 
         self.verbose = verbose
         self.csv_separator = csv_separator
+        self.to_csv = to_csv
 
         # Set the constant for the table name
         self.TABLE_NAME = "embeddings"
@@ -38,6 +41,13 @@ class SimilarityCalculator:
         # initialize the db connection
         self.con = self.initialize_duckdb_connection(db_path=db_path)
 
+        # get the dataset name
+        self.dataset_name, self.csv_path = self.extract_dataset_name_and_csv_path(
+            ground_truth_path=ground_truth_path
+        )
+        # Used to avoid writting multiple column names in the csv
+        self.first_file_write = True
+
         # load the ground truth
         # also convert it to a dictionary for better search performance
         gt = self.load_dataset(dataset=ground_truth_path)
@@ -45,6 +55,24 @@ class SimilarityCalculator:
 
         if self.verbose:
             print("Similarity Calculator Initialized")
+
+    def extract_dataset_name_and_csv_path(self, ground_truth_path: str) -> tuple:
+        """Get the dataset name from the ground_truth_path
+
+        We know that the ground_truth_path contains the dataset. for example
+        myfolder/D2/gt_clean.csv
+        We will extract this "D2"
+        The following code works given that all datasets are named D#
+
+        Also return the csv path
+        This will be as the ground_truth but with similarities.csv
+        """
+        dataset_number = ground_truth_path.split("/D")[-1].split("/")[0]
+
+        csv_path = ground_truth_path.rsplit("/", maxsplit=1)[0]
+        csv_path += "/similarities.csv"
+
+        return f"D{dataset_number}", csv_path
 
     def initialize_duckdb_connection(self, db_path: str):
         """Initialize a duckdb connection
@@ -138,31 +166,82 @@ class SimilarityCalculator:
         # return them
         return ids, embeddings
 
+    def calculate_metrics(
+        self, metrics: dict, correct_d2_id: str, d2_candidate_ids: list, top_k: int
+    ) -> dict:
+        """Calculate TP, FP for each of the top_k first positions
+
+        NOTE: We wont calculate FN as for recall we will use
+        THE NUMBER OF TOTAL DUPLICATES PER DATASET as our denominator
+
+        top_k must be >=1 and <= len(d2_candidate_ids)
+        """
+
+        # Now calculate the metrics
+        # We will do this for k in [2, top_k]
+
+        # First position will be handled separately
+        if correct_d2_id == d2_candidate_ids[0]:
+            metrics[1]["TP"] += 1
+        else:
+            metrics[1]["FP"] += 1
+
+        for k in range(2, top_k + 1):
+            # # if the d2_candidate_ids does not have as many elements break
+            # if len(d2_candidate_ids) < k:
+            #     break
+
+            # check if the correct id is in the top_k positions
+            if correct_d2_id in d2_candidate_ids[:k]:
+                # count as correct
+                metrics[k]["TP"] += 1
+                # all others in top_k are considered FP
+                # TODO: This here in some cases is: len(d2_candidate_ids) - 1
+                # As the list may have less than k elements
+                metrics[k]["FP"] += max(k, len(d2_candidate_ids)) - 1
+            # if it's not in the top_k
+            else:
+                # we have as many FP as K
+                # we have + 1 FN
+                metrics[k]["FP"] += k
+
+        # return the calculated metrics
+        return metrics
+
     def extract_statistics(
         self,
         df: pd.DataFrame,
         embedding_model: Embedding_Models,
         similarity_metric: SimilarityMetric,
+        top_k: int = 5,
     ):
         """Extract statistics from the dataframe
 
         We are interested in
         The percentage of correct predicted id2
-        The percentage where the correct id2 was in the first two spots
-        The percentage where the correct id2 was in the first three spots
-        The percentage where the correct id2 was in the first four spots
-        The percentage where the correct id2 was in the five three spots
-        etc
+        The percentage where the correct id2 was in the first top_k spots
+
+        This will have a clear tradeoff in recall / precision
+
+        NOTE: We wont calculate FN as for recall we will use
+        THE NUMBER OF TOTAL DUPLICATES PER DATASET as our denominator
+
+        top_k must be >=1 and <= len(d2_candidate_ids)
         """
-        total_correct = 0
-        correct_top_2 = 0
-        total_top_2 = 0
-        correct_top_3 = 0
-        total_top_3 = 0
-        correct_top_4 = 0
-        total_top_4 = 0
-        correct_top_5 = 0
-        total_top_5 = 0
+
+        # make sure the top_k is valid
+        assert top_k >= 1, "Invalid top_k! It must be in >=1"
+
+        recall_denominator = len(self.gt)
+
+        # create the dicrionary based on top_k
+        metrics = {}
+        for k in range(1, top_k + 1):
+            metrics[k] = {
+                "TP": 0,
+                "FP": 0,
+            }
+
         d1_ids_with_no_match = 0
 
         for idx, row in df.iterrows():
@@ -175,44 +254,28 @@ class SimilarityCalculator:
             correct_d2 = self.gt[row["d1_id"]]
             sorted_d2_ids = row["sorted_d2_ids"]
 
-            # count correct
-            if row["predicted_d2_id"] == correct_d2:
-                total_correct += 1
+            mertrics = self.calculate_metrics(
+                metrics=metrics,
+                correct_d2_id=correct_d2,
+                d2_candidate_ids=sorted_d2_ids,
+                top_k=top_k,
+            )
 
-            # get top_2
-            if len(sorted_d2_ids) >= 2:
-                total_top_2 += 1
-
-                if correct_d2 in sorted_d2_ids[:2]:
-                    correct_top_2 += 1
-
-            # get top_3
-            if len(sorted_d2_ids) >= 3:
-                total_top_3 += 1
-
-                if correct_d2 in sorted_d2_ids[:3]:
-                    correct_top_3 += 1
-
-            # get top_4
-            if len(sorted_d2_ids) >= 4:
-                total_top_4 += 1
-
-                if correct_d2 in sorted_d2_ids[:4]:
-                    correct_top_4 += 1
-
-        return {
+        # Create the statistics dictionary
+        statistics = {
             "EMBEDDING_MODEL": str(embedding_model),
             "SIMILARITY_METRIC": str(similarity_metric),
-            "correct_percentage": total_correct / len(df),
-            "correct": f"{total_correct}/{len(df)}",
-            "in top_2_percentage": correct_top_2 / total_top_2,
-            "in top_2": f"{correct_top_2}/{total_top_2}",
-            "in top_3_percentage": correct_top_3 / total_top_3,
-            "in top_3": f"{correct_top_3}/{total_top_3}",
-            "in top_4_percentage": correct_top_4 / total_top_4,
-            "in top_4": f"{correct_top_4}/{total_top_4}",
+            "DATASET": self.dataset_name,
             "d1 ids without match": d1_ids_with_no_match,
         }
+
+        for key in mertrics.keys():
+            statistics[f"top_{key}_recall"] = mertrics[key]["TP"] / recall_denominator
+            statistics[f"top_{key}_precision"] = mertrics[key]["TP"] / (
+                mertrics[key]["TP"] + mertrics[key]["FP"]
+            )
+
+        return statistics
 
     def print_statistics(self, statistics: dict):
         """Print statistics in a pretty way"""
@@ -224,8 +287,27 @@ class SimilarityCalculator:
         print("-" * len(label))
 
         print(json.dumps(statistics, indent=4))
-        print('\n')
+        print("\n")
 
+    def save_report(self, data: dict, sep: str = ",") -> None:
+        """Save the sstatistics in a csv file
+
+        The file name will be similarities.csv
+        The easiest way to do this is cast the dict to a csv and use pandas
+        """
+        df = pd.DataFrame(data, index=list(range(len(data))))
+
+        if self.verbose:
+            pprint(df.head())
+            print("Will be written to the similarities csv")
+
+        # Mode is always 'a' as the file is created once when the class is initialized
+        # if its the first time include the headers
+        if self.first_file_write:
+            df.to_csv(self.csv_path, index=False, mode="a", sep=sep)
+            self.first_file_write = False
+        else:
+            df.to_csv(self.csv_path, index=False, mode="a", sep=sep, header=False)
 
     def calculate_similarities(
         self, metric: SimilarityMetric, embedding_model: Embedding_Models
@@ -374,3 +456,6 @@ class SimilarityCalculator:
 
         self.print_statistics(statistics=stats)
 
+        # If requested also save the data to a csv file
+        if self.to_csv:
+            self.save_report(data=stats)
