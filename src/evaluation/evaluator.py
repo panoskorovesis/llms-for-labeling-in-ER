@@ -235,7 +235,8 @@ class Evaluator:
         run_id: str,
         metrics: dict,
         elapsed_time: dict,
-    ):
+        sep: str = ",",
+    ) -> None:
         """Crete a dataframe with the given information and then save to the csv file"""
         data = {"Model": str(model), "Prompt Type": prompt_type, "Run ID": run_id}
 
@@ -252,12 +253,10 @@ class Evaluator:
         # Mode is always 'a' as the file is created once when the class is initialized
         # if its the first time include the headers
         if self.first_file_write:
-            df.to_csv(self.csv_path, index=False, mode="a", sep="|")
+            df.to_csv(self.csv_path, index=False, mode="a", sep=sep)
             self.first_file_write = False
         else:
-            df.to_csv(self.csv_path, index=False, mode="a", sep="|", header=False)
-
-        return
+            df.to_csv(self.csv_path, index=False, mode="a", sep=sep, header=False)
 
     def evaluate(self, model: Models, prompt_type: PromptTypes, run_id: str) -> dict:
         """Calculate the the metrics and return them in a dictionary
