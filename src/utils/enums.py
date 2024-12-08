@@ -31,6 +31,9 @@ class Embedding_Models(Enum):
     STELLA_EN = 3
     EMBER_V1 = 4
     MINI_LM_V6 = 5
+    MINI_LM_L12_V2 = 6
+    BGE_M3 = 7
+    E5_MISTRAL_7B = 8
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -44,6 +47,12 @@ class Embedding_Models(Enum):
             return "llmrails/ember-v1"
         elif self.name == "MINI_LM_V6":
             return "sentence-transformers/all-MiniLM-L6-v2"
+        elif self.name == "MINI_LM_L12_V2":
+            return "sentence-transformers/all-MiniLM-L12-v2"
+        elif self.name == "BGE_M3":
+            return "BAAI/bge-m3"
+        elif self.name == "E5_MISTRAL_7B":
+            return "intfloat/e5-mistral-7b-instruct"
 
 
 class Models(Enum):
