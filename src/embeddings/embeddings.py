@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 
@@ -5,6 +6,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 import torch
+from FlagEmbedding import BGEM3FlagModel
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -40,21 +42,21 @@ class Embedder:
         with open(d2_records_path, "r") as fp:
             self.d2_records = json.load(fp)
 
-        # Load the tokenizer and the model
-        self.tokenizer, self.model = self.load_tokenizer_and_model(model)
-
-        # initialize the db connection
-        self.con = self.initialize_duckdb_connection(d1_records_path=d1_records_path)
-
         if not use_gpu:
             self.device = "cpu"
         # If the user requested a gpu use it if available
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # Load the tokenizer and the model
+        self.tokenizer, self.model = self.load_tokenizer_and_model(model)
+
+        # initialize the db connection
+        self.con = self.initialize_duckdb_connection(d1_records_path=d1_records_path)
+
         if self.verbose:
             print(f"Will run on {self.device}")
-            print('Embedder initialized')
+            print("Embedder initialized")
 
     def load_tokenizer_and_model(self, model: Embedding_Models) -> tuple:
         """Load the requried tokenizer and model
@@ -74,7 +76,13 @@ class Embedder:
             Embedding_Models.EMBER_V1,
             Embedding_Models.MINI_LM_V6,
             Embedding_Models.STELLA_EN,
+            Embedding_Models.MINI_LM_L12_V2,
+            Embedding_Models.E5_MISTRAL_7B,
         }
+
+        # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
+        # They use their own library, not sentence transformers
+        baai_models = {Embedding_Models.BGE_M3}
 
         if model in traditional_models:
             tokenizer = AutoTokenizer.from_pretrained(
@@ -84,7 +92,17 @@ class Embedder:
 
         elif model in sentence_transformers:
             tokenizer = None
-            emb_model = SentenceTransformer(str(model), trust_remote_code=True)
+            # NOTE: SentenceTransformer will go to gpu by default if it's available
+            # Some of our models do not fit in gpu so we have to specify the device here
+            # Later the model.to() will essentially do nothing but that's ok!
+            emb_model = SentenceTransformer(
+                str(model),
+                device=self.device,
+                trust_remote_code=True,
+            )
+        elif model in baai_models:
+            tokenizer = None
+            emb_model = BGEM3FlagModel(str(model), use_fp16=True)
         else:
             raise ValueError(f"Model: {str(model)} is not currently supported!")
 
@@ -133,6 +151,7 @@ class Embedder:
             record_id VARCHAR NOT NULL,
             dataset VARCHAR NOT NULL,
             embeddings FLOAT[] NOT NULL,
+            created_at TIMESTAMP NOT NULL,
             model VARCHAR NOT NULL
         );
         """)
@@ -215,10 +234,16 @@ class Embedder:
         """
         self.con.execute(
             f"""
-        INSERT INTO {self.TABLE_NAME} (record_id, dataset, embeddings, model) 
-        VALUES(?, ?, ?, ?)
+        INSERT INTO {self.TABLE_NAME} (record_id, dataset, embeddings, created_at, model) 
+        VALUES(?, ?, ?, ?, ?)
         """,
-            [record_id, dataset_name, embeddings.tolist(), str(model)],
+            [
+                record_id,
+                dataset_name,
+                embeddings.tolist(),
+                datetime.datetime.now(),
+                str(model),
+            ],
         )
 
     def generate_embeddings(
@@ -300,11 +325,19 @@ class Embedder:
         This will be done using the .encode functionality
         No checks for gpu are needed here since encode()
         returns a numpy array
+
+        BAAI models need special handling for the embedding generation
         """
 
         # the shape will be (1, embeddings_size)
         # We want to get rid of the 1, so we flatten
-        embeddings = self.model.encode([text])
+        if self.e_model == Embedding_Models.BGE_M3:
+            embeddings = self.model.encode(
+                [text],
+                max_length=8192,  # This is the proposed lengh. We can make it smaller if we want
+            )["dense_vecs"]
+        else:
+            embeddings = self.model.encode([text])
         # here the shape is (1, embeddings_size)
         # to make things easier for further calculations we will flatten
         # the final shape will be (embeddings_size,)
@@ -351,8 +384,11 @@ class Embedder:
 
         # change the model to the device
         if self.verbose:
-            print(f'Switching model to: {self.device}')
-        self.model = self.model.to(self.device)
+            print(f"Switching model to: {self.device}")
+
+        # This applied to all except BAAI Models
+        if self.e_model != Embedding_Models.BGE_M3:
+            self.model = self.model.to(self.device)
 
         # If it's a traditional model then the self.tokenizer attribute wont be null
         if self.tokenizer is not None:
