@@ -184,8 +184,10 @@ class LLM:
                 if int(word) <= max_number:
                     return ValidationStatus.VALID, int(word)
                 # Answer is out of bounds
-                else: 
-                    print(f'Answer OUT OF BOUNDS. Total Options: {max_number}. Answer: {word}')
+                else:
+                    print(
+                        f"Answer OUT OF BOUNDS. Total Options: {max_number}. Answer: {word}"
+                    )
                     return ValidationStatus.INVALID, ""
             except Exception as e:
                 if self.verbose:
@@ -278,6 +280,15 @@ class LLM:
         # if they are > max truncate
         # We will keep max_tokens - 300 just to be safe
         # We will also keep the last 100 tokens as they may contain important information
+        # We can see that PHI3 has an issue when the tokens are above 1700
+        # We will set the max_tokens accordingly
+        #TODO: What are we going to do with this? Keep it or not?
+        if self.model == Models.PHI_3_INSTRUCT and 1==0:
+            max_tokens = 1650
+        # for the rest of the cases, given that's it's an estimation we take 100 out of the max to be safe
+        else:
+            max_tokens -= 100
+
         if len(tokens) > max_tokens:
             if self.verbose:
                 print(
