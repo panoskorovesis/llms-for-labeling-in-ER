@@ -155,7 +155,7 @@ class BruteForce:
             d2_candidates_id VARCHAR[] NOT NULL,
             result VARCHAR NULL,
             request_status VARCHAR NOT NULL,
-            inserted_at DATE NOT NULL,
+            inserted_at TIMESTAMP NOT NULL,
             prompt_type VARCHAR NOT NULL,
             model VARCHAR NOT NULL,
             run_id VARCHAR NOT NULL,
