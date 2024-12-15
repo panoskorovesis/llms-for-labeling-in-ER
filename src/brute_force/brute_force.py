@@ -271,6 +271,7 @@ class BruteForce:
         model: Models,
         prompt_type: PromptTypes,
         num_predict: int = 128,
+        max_input_tokens: int = 2048,
         restart=False,
     ) -> None:
         """Run the MATCHING method on all the available pairs
@@ -325,6 +326,7 @@ class BruteForce:
                     candidate_records=[d2_text],
                     temperature=temperature,
                     num_predict=num_predict,
+                    max_tokens=max_input_tokens,
                 )
 
                 if self.verbose:
@@ -360,6 +362,7 @@ class BruteForce:
         model: Models,
         prompt_type: PromptTypes,
         num_predict: int = 128,
+        max_input_tokens: int = 2048,
         restart=False,
     ):
         """Run the comparing prompt method
@@ -414,6 +417,7 @@ class BruteForce:
                         candidate_records=[d2_i_record, d2_n_record],
                         temperature=temperature,
                         num_predict=num_predict,
+                        max_tokens=max_input_tokens,
                     )
 
                     if self.verbose:
@@ -476,6 +480,7 @@ class BruteForce:
         model: Models,
         prompt_type: PromptTypes,
         num_predict: int = 128,
+        max_input_tokens: int = 2048,
         restart=False,
     ):
         """Run the Selecting Method
@@ -533,6 +538,7 @@ class BruteForce:
                     candidate_records=[d2_text],
                     temperature=temperature,
                     num_predict=num_predict,
+                    max_tokens=max_input_tokens,
                 )
 
                 if self.verbose:
@@ -570,6 +576,7 @@ class BruteForce:
                             candidate_records=[d2_i_record, d2_n_record],
                             temperature=temperature,
                             num_predict=num_predict,
+                            max_tokens=max_input_tokens
                         )
 
                         if self.verbose:
@@ -630,6 +637,7 @@ class BruteForce:
                     candidate_records=candidate_pairs_text,
                     temperature=temperature,
                     num_predict=num_predict,
+                    max_tokens=max_input_tokens
                 )
 
             # Else set it by hand
@@ -662,13 +670,6 @@ class BruteForce:
                 run_id=run_id,
             )
 
-            self.con.execute(
-                """
-            INSERT INTO selecting_responses(rsp) VALUES(?)
-            """,
-                [response],
-            )
-
     def run(
         self,
         mode: BruteForceMode,
@@ -677,6 +678,7 @@ class BruteForce:
         temperature: float,
         prompt_type: PromptTypes,
         num_predict: int = 128,
+        max_input_tokens: int = 2048,
         restart=False,
     ):
         """This is the main method that executes the brute force
@@ -719,6 +721,7 @@ class BruteForce:
                 prompt_type=prompt_type,
                 num_predict=num_predict,
                 restart=restart,
+                max_input_tokens=max_input_tokens
             )
 
         elif mode == BruteForceMode.COMPARING:
@@ -729,6 +732,7 @@ class BruteForce:
                 prompt_type=prompt_type,
                 num_predict=num_predict,
                 restart=restart,
+                max_input_tokens=max_input_tokens
             )
 
         elif mode == BruteForceMode.SELECTING:
@@ -739,6 +743,7 @@ class BruteForce:
                 prompt_type=prompt_type,
                 num_predict=num_predict,
                 restart=restart,
+                max_input_tokens=max_input_tokens
             )
 
         else:

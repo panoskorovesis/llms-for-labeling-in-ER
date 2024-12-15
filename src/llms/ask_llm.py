@@ -198,7 +198,7 @@ class LLM:
             raise ValueError(f"Prompt Type: {prompt_type} is not Supported!")
 
     def send_request(
-        self, prompt: str, temperature: float, num_predict: int = 128
+        self, prompt: str, temperature: float, num_predict: int = 128, max_input_tokens: int =2048
     ) -> str:
         """Send a request to the LLM server.
 
@@ -231,8 +231,10 @@ class LLM:
             "model": str(self.model),
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": num_predict},
+            "options": {"temperature": temperature, "num_predict": num_predict, "num_ctx": max_input_tokens},
         }
+
+        print(f'Context Lengh: {max_input_tokens}')
 
         for i in range(self.max_request_tries):
             try:
@@ -275,27 +277,21 @@ class LLM:
         tokens = encoder.encode(text)
 
         if self.verbose:
-            print(f"@@@@ TOTAL TOKENS: {len(tokens)}")
+            print(f"@@@@ TOTAL TOKENS: {len(tokens)}. MAX ALLOWED: {max_tokens}")
 
         # if they are > max truncate
-        # We will keep max_tokens - 300 just to be safe
+        # We will keep max_tokens - 200 just to be safe
+        # THis is needed as the token calculation is an approximation
         # We will also keep the last 100 tokens as they may contain important information
-        # We can see that PHI3 has an issue when the tokens are above 1700
-        # We will set the max_tokens accordingly
-        #TODO: What are we going to do with this? Keep it or not?
-        if self.model == Models.PHI_3_INSTRUCT and 1==0:
-            max_tokens = 1650
-        # for the rest of the cases, given that's it's an estimation we take 100 out of the max to be safe
-        else:
-            max_tokens -= 100
+        max_tokens -= 200
 
         if len(tokens) > max_tokens:
             if self.verbose:
                 print(
-                    f"Prompt has {len(tokens)} tokens! We will keep: {max_tokens - 200}"
+                    f"Prompt has {len(tokens)} tokens! We will keep: {max_tokens}"
                 )
 
-            tokens_to_keep = max_tokens - 700
+            tokens_to_keep = max_tokens - 100
             # Truncate, keeping the last 100
             truncated_tokens = tokens[:tokens_to_keep] + tokens[-100:]
 
@@ -328,11 +324,9 @@ class LLM:
 
         # If the prompt size is bigger than the max then we have to truncate
         # Reminder: Default size is 2048 tokens
-        # To be sure, since we are using an estimation we will compromize to max - 200
         # This will only be applied if the user requested the max tokens or more
-        if max_tokens >= 2048:
-            max_tokens = 1848
-
+        # Further prunning will happen in truncate_prompt_if_needed
+        # The max_tokens are ALSO SET as the models context length
         prompt = self.truncate_prompt_if_needed(prompt, max_tokens=max_tokens)
 
         if self.verbose:
@@ -340,7 +334,7 @@ class LLM:
 
         # send the request
         rsp = self.send_request(
-            prompt=prompt, temperature=temperature, num_predict=num_predict
+            prompt=prompt, temperature=temperature, num_predict=num_predict, max_input_tokens=max_tokens
         )
 
         # in case of error -> None
