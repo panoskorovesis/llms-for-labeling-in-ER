@@ -1,6 +1,7 @@
 # faiss should already be installed as a part of the pyjedai package
 import faiss
 from src.utils.enums import SimilarityMetric, Embedding_Models
+import datetime
 import duckdb
 import json
 from tqdm import tqdm
@@ -45,6 +46,10 @@ class SimilarityCalculator:
         self.dataset_name, self.csv_path = self.extract_dataset_name_and_csv_path(
             ground_truth_path=ground_truth_path
         )
+
+        # Initialize the similarities csv
+        self.initialize_results_csv(csv_path=self.csv_path)
+
         # Used to avoid writting multiple column names in the csv
         self.first_file_write = True
 
@@ -73,6 +78,16 @@ class SimilarityCalculator:
         csv_path += "/similarities.csv"
 
         return f"D{dataset_number}", csv_path
+
+    def initialize_results_csv(self, csv_path) -> str:
+        """Create a new file at the specified path. The file name is ALREADY Included"""
+        with open(csv_path, "w") as fp:
+            fp.write("")
+
+        if self.verbose:
+            print(f"{csv_path} has been created!")
+
+        return csv_path
 
     def initialize_duckdb_connection(self, db_path: str):
         """Initialize a duckdb connection
@@ -289,13 +304,39 @@ class SimilarityCalculator:
         print(json.dumps(statistics, indent=4))
         print("\n")
 
+    def get_embeddings_generation_time(self, model: str):
+        """Return the total embeddings generation time in minutes or hours"""
+        # We expect only one row so we can use fetch one
+        start_time, end_time = self.con.sql(
+            f"""
+            SELECT min(created_at), max(created_at)
+            FROM embeddings
+            WHERE model = '{model}'
+            """
+        ).fetchone()
+
+        # get the elapsed time
+        elapsed_time = end_time - start_time
+
+        # if it's less than one hour return in minutes
+        if elapsed_time < datetime.timedelta(hours=1):
+            return f'{elapsed_time.total_seconds() / 60:.2f} minutes'
+        else:
+            return f'{elapsed_time.total_seconds() / 3600:.2f} hours'
+
     def save_report(self, data: dict, sep: str = ",") -> None:
         """Save the sstatistics in a csv file
 
         The file name will be similarities.csv
         The easiest way to do this is cast the dict to a csv and use pandas
         """
-        df = pd.DataFrame(data, index=list(range(len(data))))
+
+        # Add the total generation time to the results
+        data['EMBEDDINGS_GENERATION_TIME'] = self.get_embeddings_generation_time(
+            model=data["EMBEDDING_MODEL"]
+        )
+
+        df = pd.DataFrame(data, index=[1])
 
         if self.verbose:
             pprint(df.head())
