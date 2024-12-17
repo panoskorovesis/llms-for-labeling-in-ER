@@ -6,7 +6,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 import torch
-from FlagEmbedding import BGEM3FlagModel
+from FlagEmbedding import BGEM3FlagModel, FlagICLModel
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -23,6 +23,7 @@ class Embedder:
         verbose: bool = False,
         max_word_embeddings_size: int = 256,
         use_gpu=False,
+        use_last_token_pool=False,
     ):
         # depending on the model create
         # 1) Tokenizer, model
@@ -31,6 +32,7 @@ class Embedder:
         self.verbose = verbose
         self.e_model = model
         self.max_word_embeddings_size = max_word_embeddings_size
+        self.use_last_token_pool = use_last_token_pool
 
         # Set the constant for the table name
         self.TABLE_NAME = "embeddings"
@@ -70,6 +72,7 @@ class Embedder:
         traditional_models = {
             Embedding_Models.ROBERTA_LARGE,
             Embedding_Models.QWEN_2_5_7B,
+            Embedding_Models.GEMMA_2,
         }
 
         sentence_transformers = {
@@ -83,6 +86,9 @@ class Embedder:
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
         # They use their own library, not sentence transformers
         baai_models = {Embedding_Models.BGE_M3}
+
+        # One variation also requires the FlagICLModel import
+        baai_icl_models = {Embedding_Models.BGE_EN_ICL}
 
         if model in traditional_models:
             tokenizer = AutoTokenizer.from_pretrained(
@@ -103,6 +109,9 @@ class Embedder:
         elif model in baai_models:
             tokenizer = None
             emb_model = BGEM3FlagModel(str(model), use_fp16=True)
+        elif model in baai_icl_models:
+            tokenizer = None
+            emb_model = FlagICLModel(str(model), use_fp16=True)
         else:
             raise ValueError(f"Model: {str(model)} is not currently supported!")
 
@@ -246,6 +255,20 @@ class Embedder:
             ],
         )
 
+    def last_token_pool(
+        self, last_hidden_states: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        left_padding = attention_mask[:, -1].sum() == attention_mask.shape[0]
+        if left_padding:
+            return last_hidden_states[:, -1]
+        else:
+            sequence_lengths = attention_mask.sum(dim=1) - 1
+            batch_size = last_hidden_states.shape[0]
+            return last_hidden_states[
+                torch.arange(batch_size, device=last_hidden_states.device),
+                sequence_lengths,
+            ]
+
     def generate_embeddings(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor
     ):
@@ -257,11 +280,19 @@ class Embedder:
         with torch.no_grad():
             ouputs = self.model(input_ids, attention_mask=attention_mask)
 
-        # The embeddings are in the last_hidden_state with a shape of
-        # torch.Size([1, x, y]), x: The number of tokens (words), y the size of the produced embeddings
-        # to get a sentence representation we will do a mean()
-        text_embeddings = ouputs.last_hidden_state
-        text_embeddings = text_embeddings.mean(dim=1)
+        if not self.use_last_token_pool:
+            # The embeddings are in the last_hidden_state with a shape of
+            # torch.Size([1, x, y]), x: The number of tokens (words), y the size of the produced embeddings
+            # to get a sentence representation we will do a mean()
+            text_embeddings = ouputs.last_hidden_state
+            text_embeddings = text_embeddings.mean(dim=1)
+        # Another way is proposed here
+        # https://huggingface.co/intfloat/e5-mistral-7b-instruct
+        # This keeps only the last layer, removing padding
+        else:
+            text_embeddings = self.last_token_pool(
+                ouputs.last_hidden_state, attention_mask=attention_mask
+            )
         # then we will convert to numpy from tensors
         # if we are in cuda, copy the tensor to cpu first
         if str(self.device) == "cuda":
@@ -308,7 +339,8 @@ class Embedder:
 
             # generate the embeddings
             embeddings = self.generate_embeddings(
-                input_ids=input_ids, attention_mask=attention_mask
+                input_ids=input_ids,
+                attention_mask=attention_mask,
             )
 
             # save them to the db
@@ -336,6 +368,8 @@ class Embedder:
                 [text],
                 max_length=8192,  # This is the proposed lengh. We can make it smaller if we want
             )["dense_vecs"]
+        elif self.e_model == Embedding_Models.BGE_EN_ICL:
+            raise NotImplementedError("BGE_EN_ICL Not yet implemented")
         else:
             embeddings = self.model.encode([text])
         # here the shape is (1, embeddings_size)
