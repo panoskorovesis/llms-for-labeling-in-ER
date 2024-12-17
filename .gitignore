@@ -12,4 +12,10 @@
 config.json
 
 # the datasets
-datasets/
+er_datasets/
+
+# duckdb executable
+duckdb
+
+# nohup output files
+nohup.out
