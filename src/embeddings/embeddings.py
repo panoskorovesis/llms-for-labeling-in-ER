@@ -20,10 +20,12 @@ class Embedder:
         model: Embedding_Models,
         d1_records_path: str,
         d2_records_path: str,
+        pairs_path: str,
         verbose: bool = False,
         max_word_embeddings_size: int = 256,
         use_gpu=False,
         use_last_token_pool=False,
+        use_task=False,  # Setting this to true will generate embeddings using A task along with the d1 record id
     ):
         # depending on the model create
         # 1) Tokenizer, model
@@ -33,9 +35,13 @@ class Embedder:
         self.e_model = model
         self.max_word_embeddings_size = max_word_embeddings_size
         self.use_last_token_pool = use_last_token_pool
+        self.use_task = use_task
 
         # Set the constant for the table name
-        self.TABLE_NAME = "embeddings"
+        if not self.use_task:
+            self.TABLE_NAME = "embeddings"
+        else:
+            self.TABLE_NAME = "task_embeddings"
 
         # Load the jsons
         with open(d1_records_path, "r") as fp:
@@ -43,6 +49,9 @@ class Embedder:
 
         with open(d2_records_path, "r") as fp:
             self.d2_records = json.load(fp)
+
+        with open(pairs_path, "r") as fp:
+            self.pairs = json.load(fp)
 
         if not use_gpu:
             self.device = "cpu"
@@ -73,6 +82,8 @@ class Embedder:
             Embedding_Models.ROBERTA_LARGE,
             Embedding_Models.QWEN_2_5_7B,
             Embedding_Models.GEMMA_2,
+            Embedding_Models.E5_MISTRAL_7B,
+            Embedding_Models.PHI_3
         }
 
         sentence_transformers = {
@@ -80,7 +91,7 @@ class Embedder:
             Embedding_Models.MINI_LM_V6,
             Embedding_Models.STELLA_EN,
             Embedding_Models.MINI_LM_L12_V2,
-            Embedding_Models.E5_MISTRAL_7B,
+            Embedding_Models.SFR_EMBEDDING_MISTRAL,
         }
 
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
@@ -91,10 +102,8 @@ class Embedder:
         baai_icl_models = {Embedding_Models.BGE_EN_ICL}
 
         if model in traditional_models:
-            tokenizer = AutoTokenizer.from_pretrained(
-                str(Embedding_Models.ROBERTA_LARGE)
-            )
-            emb_model = AutoModel.from_pretrained(str(Embedding_Models.ROBERTA_LARGE))
+            tokenizer = AutoTokenizer.from_pretrained(str(model))
+            emb_model = AutoModel.from_pretrained(str(model))
 
         elif model in sentence_transformers:
             tokenizer = None
@@ -140,7 +149,7 @@ class Embedder:
 
         return con
 
-    def create_db_table_if_needed(self, table_name: str, force=False):
+    def create_db_table_if_needed(self, force=False):
         """Create a table to store the embeddings in duckdb
 
         If the force is set to True we will delete the table and recreate it
@@ -148,28 +157,59 @@ class Embedder:
         """
 
         if force:
-            self.con.sql(f"""DROP TABLE IF EXISTS {table_name}""")
+            self.con.sql(f"""DROP TABLE IF EXISTS {self.TABLE_NAME}""")
 
             if self.verbose:
-                print(f"Table {table_name} was deleted. It will be recreated.")
+                print(f"Table {self.TABLE_NAME} was deleted. It will be recreated.")
 
-        # This table will be empty
-        # Columns will be added on the fly containing the name of the model that generated the embeddings
-        self.con.sql(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            record_id VARCHAR NOT NULL,
-            dataset VARCHAR NOT NULL,
-            embeddings FLOAT[] NOT NULL,
-            created_at TIMESTAMP NOT NULL,
-            model VARCHAR NOT NULL
-        );
-        """)
+        # If we dont have a task we look at the embeddings table
+        if not self.use_task:
+            # This table will be empty
+            # Columns will be added on the fly containing the name of the model that generated the embeddings
+            self.con.sql(f"""
+            CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
+                record_id VARCHAR NOT NULL,
+                embeddings FLOAT[] NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                model VARCHAR NOT NULL
+            );
+            """)
+        # if we have a task we look at task_embeddings
+        else:
+            # Also create the table for the instruct embeddings
+            # Field explanation:
+            # d1_reference_id: The d1_id which can be found as a key in the pairs.json
+            # record_id: The id the embeddings bellong to. THis can be from d1 or d2
+            # is_d2:
+            #   True --> the record_id reffers to d2
+            #   False --> the record_id reffers to d1
+            self.con.sql(f"""
+            CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
+                d1_reference_id VARCHAR NOT NULL,
+                record_id VARCHAR NOT NULL,
+                is_d2 BOOLEAN NOT NULL,
+                embeddings FLOAT[] NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                model VARCHAR NOT NULL
+            );
+            """)
 
     def get_ids_and_texts(self, data: dict):
         """Separate the dict data into two lists
         One with the keys and another with the values
         """
         return list(data.keys()), list(data.values())
+
+    def get_detailed_instruct(self, task_description: str, query: str) -> str:
+        """Create the task description for the LLM
+
+        This will be used in the embeddings generation method that requires
+        1) The d1 record
+        2) All d2 candidate records
+
+        This applies only to the method that DOES NOT use sentence transformers
+        """
+        return f"Instruct: {task_description}\nQuery: {query}"
 
     def tokenize_data(self, texts: list) -> tuple:
         """Tokenize the data using the tokenizer
@@ -179,13 +219,27 @@ class Embedder:
 
         # Tokenize using batch_encode_plus method
         # This will return a json with input_ids and the attention masks
-        encoding = self.tokenizer.batch_encode_plus(
+        # encoding = self.tokenizer.batch_encode_plus(
+        #     texts,
+        #     padding=True,
+        #     truncation=True,
+        #     max_length=self.max_word_embeddings_size,
+        #     return_tensors="pt",  # Return PyTorch tensors
+        #     add_special_tokens=True,  # Add special tokens CLS and SEP
+        # )
+
+        # If we do not include a task we know that the texts list contains only
+        # one element
+        # Otherwise, it contains the task, query (which is the d1 record) and all relevant d2 records
+        if not self.use_task:
+            texts = texts[0]
+
+        encoding = self.tokenizer(
             texts,
             padding=True,
             truncation=True,
             max_length=self.max_word_embeddings_size,
             return_tensors="pt",  # Return PyTorch tensors
-            add_special_tokens=True,  # Add special tokens CLS and SEP
         )
 
         # input_ids are numerical representations of the tokenized input text.
@@ -217,11 +271,20 @@ class Embedder:
         """
         processed_pairs = set()
 
-        records = self.con.sql(f"""
-        SELECT DISTINCT record_id
-        from {self.TABLE_NAME}
-        where model = '{model}' and dataset = '{dataset_name}'
-        """).fetchall()
+        if not self.use_task:
+            records = self.con.sql(f"""
+            SELECT DISTINCT record_id
+            from {self.TABLE_NAME}
+            where model = '{model}' and dataset = '{dataset_name}'
+            """).fetchall()
+        # If we are using a task we have to take the reference id
+        else:
+            records = self.con.sql(f"""
+            SELECT DISTINCT d1_reference_id
+            from {self.TABLE_NAME}
+            where model = '{model}'
+            """).fetchall()
+
         # NOTE: Fetchall will return these in a tuple.
         # For example (444, )
         # We want to keep only the ids and return them
@@ -249,6 +312,33 @@ class Embedder:
             [
                 record_id,
                 dataset_name,
+                embeddings.tolist(),
+                datetime.datetime.now(),
+                str(model),
+            ],
+        )
+
+    def save_task_embeddings_to_db(
+        self,
+        record_id: str,
+        d1_reference_id: str,
+        embeddings: np.array,
+        model: Embedding_Models,
+        is_d2: bool,
+    ):
+        """Perform one insertion to the db
+
+        This method will insert one task embedding to the db
+        """
+        self.con.execute(
+            f"""
+            INSERT INTO {self.TABLE_NAME} (d1_reference_id, record_id, is_d2, embeddings, created_at, model)
+            VALUES(?, ?, ?, ?, ?, ?)
+            """,
+            [
+                d1_reference_id,
+                record_id,
+                is_d2,
                 embeddings.tolist(),
                 datetime.datetime.now(),
                 str(model),
@@ -298,10 +388,21 @@ class Embedder:
         if str(self.device) == "cuda":
             text_embeddings = text_embeddings.cpu()
         text_embeddings = text_embeddings.detach().numpy()
-        # here the shape is (1, y)
-        # to make things easier for further calculations we will flatten
-        # the final shape will be (y,)
-        text_embeddings = text_embeddings.flatten()
+        """
+        GIVEN TASK = FALSE
+        here the shape is (1, y)
+        to make things easier for further calculations we will flatten
+        the final shape will be (y,)
+
+        GIVEN TASK = TRUE
+        here the shape will be (x, y)
+            x: The number of candidates + 1 (for the d1_id)
+            y: The embeddings length
+
+        In this case we DONT WANT TO FLATTEN
+        """
+        if not self.use_task:
+            text_embeddings = text_embeddings.flatten()
 
         # return them
         return text_embeddings
@@ -412,9 +513,87 @@ class Embedder:
                 dataset_name=dataset_name,
             )
 
+    def embed_word_tokens_with_task(
+        self, d1_records: dict, d2_records: dict, pairs: dict
+    ):
+        """Generate embeddings using the AutoModel and an additional task
+
+        This is the method proposed here: https://huggingface.co/intfloat/e5-mistral-7b-instruct
+
+        We will do this in batches. Each batch contains the
+        1. d1 record (which is the TASK)
+        2. All relevant d2_records (which are the documents)
+
+        Due to the fact that d2 documents can appear multiple times for
+
+        The task description will be
+        Retrieve semantically similar text.
+        OR
+        Instruct: Given a web search query, retrieve relevant passages that answer the query
+        """
+
+        TASK_DESCRIPTION = "Retrieve semantically similar text."
+
+        # We dont need a dataset name here since each db has one of it's own
+        completed_ids = self.get_completed_embeddings(
+            model=self.e_model, dataset_name=None
+        )
+
+        # For each pair in the self.pairs dictionary
+        for d1_id, d2_candidate_ids in tqdm(
+            pairs.items(), total=len(pairs), desc="Generating Task Embeddings"
+        ):
+            if d1_id in completed_ids:
+                if self.verbose:
+                    print(
+                        f"Task Embeddings already generated for {d1_id}, {self.e_model}"
+                    )
+                continue
+
+            # Locate the text for d1
+            # Also apply the instruction
+            d1_text = self.get_detailed_instruct(
+                task_description=TASK_DESCRIPTION, query=d1_records[d1_id]
+            )
+            # Locate the texts for d2
+            d2_texts = [d2_records[d2_id] for d2_id in d2_candidate_ids]
+
+            # At this point we want to merge the two keeping the d1_text at the top
+            input_texts = [d1_text] + d2_texts
+
+            # Tokenize the data using the max_word_embeddings_size defined at the constructor
+            input_ids, attention_mask = self.tokenize_data(input_texts)
+
+            # Now generate the embeddings
+            embeddings = self.generate_embeddings(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )
+
+            # Finally we have to add the embeddings to the db table
+            for idx, emb in enumerate(embeddings):
+                # if idx == 0 then we are talking about the d1 record
+                if idx == 0:
+                    self.save_task_embeddings_to_db(
+                        record_id=d1_id,
+                        d1_reference_id=d1_id,
+                        is_d2=False,
+                        embeddings=embeddings[idx][:],
+                        model=self.e_model,
+                    )
+                else:
+                    self.save_task_embeddings_to_db(
+                        # NOTE: We have to add -1 here since we are counting from 0
+                        record_id=d2_candidate_ids[idx - 1],
+                        d1_reference_id=d1_id,
+                        is_d2=True,
+                        embeddings=embeddings[idx][:],
+                        model=self.e_model,
+                    )
+
     def embed(self, restart: bool = False):
         # First create the table and the column if needed
-        self.create_db_table_if_needed(table_name=self.TABLE_NAME, force=restart)
+        self.create_db_table_if_needed(force=restart)
 
         # change the model to the device
         if self.verbose:
@@ -425,12 +604,17 @@ class Embedder:
             self.model = self.model.to(self.device)
 
         # If it's a traditional model then the self.tokenizer attribute wont be null
-        if self.tokenizer is not None:
+        if self.tokenizer is not None and not self.use_task:
             # generate embeddings for d1
             self.embed_word_tokens(records=self.d1_records, dataset_name="d1")
             # generate embeddings for d2
             self.embed_word_tokens(records=self.d2_records, dataset_name="d2")
 
+        elif self.tokenizer is not None and self.use_task:
+            # generate embeddings
+            self.embed_word_tokens_with_task(
+                d1_records=self.d1_records, d2_records=self.d2_records, pairs=self.pairs
+            )
         # if the tokenizer is none then we have a sentence transformer
         else:
             # generate embeddings for d1

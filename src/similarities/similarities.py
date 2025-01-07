@@ -8,6 +8,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from pprint import pprint
+import torch.nn.functional as F
 
 
 class SimilarityCalculator:
@@ -25,15 +26,14 @@ class SimilarityCalculator:
         verbose: bool = False,
         csv_separator: str = "|",
         to_csv=False,
+        normalize=False,
     ) -> None:
         """The constructor"""
 
         self.verbose = verbose
         self.csv_separator = csv_separator
         self.to_csv = to_csv
-
-        # Set the constant for the table name
-        self.TABLE_NAME = "embeddings"
+        self.normalize = normalize
 
         # load the pairs.json file
         with open(pairs_path, "r") as fp:
@@ -89,6 +89,11 @@ class SimilarityCalculator:
 
         return csv_path
 
+    def _normalize(self, arr, p=2, axis=None):
+        """Perform the equivalent of torch F.normalize"""
+        norm = np.linalg.norm(arr, ord=p, axis=axis, keepdims=True)
+        return arr / norm
+
     def initialize_duckdb_connection(self, db_path: str):
         """Initialize a duckdb connection
 
@@ -135,6 +140,9 @@ class SimilarityCalculator:
         We have to create the index with the appropriate size
         The size of the index must be the vector dimensionality or embedding size
         To find this we will query the database using with the embedding model we want
+
+        Depending on the use_task flag we have to choose between the embeddings table and
+        the tast_embeddings table
         """
 
         # This is needed as the result is returned in a tuple (lenght,)
@@ -161,7 +169,7 @@ class SimilarityCalculator:
         return index
 
     def get_embeddings_from_db(
-        self, record_ids: list, dataset: str, model: Embedding_Models
+        self, record_ids: list, dataset: str, model: Embedding_Models, use_task=False
     ):
         """Get the embeddings of the requested Ids, based on the model and the dataset
 
@@ -169,17 +177,57 @@ class SimilarityCalculator:
         This will prevent any errors
         """
 
-        # we specify the d1 dataset
-        # again, the results are in a tuple, we need all except the last
-        results = self.con.sql(f"""
-                            SELECT record_id, embeddings from {self.TABLE_NAME} where model = '{model}' and dataset = '{dataset}' and record_id in {record_ids}
-                            """).fetchall()
-        # separate the ids and the embeddings
-        # We use zip and *results which separates each tuple in a, b
-        # Then zip allows us to iterate or do what we have done to get the separate elements
-        ids, embeddings = zip(*results)
-        # return them
-        return ids, embeddings
+        if not use_task:
+            # we specify the d1 dataset
+            # again, the results are in a tuple, we need all except the last
+            results = self.con.sql(f"""
+                                SELECT record_id, embeddings from {self.TABLE_NAME} where model = '{model}' and dataset = '{dataset}' and record_id in {record_ids}
+                                """).fetchall()
+            # separate the ids and the embeddings
+            # We use zip and *results which separates each tuple in a, b
+            # Then zip allows us to iterate or do what we have done to get the separate elements
+            ids, embeddings = zip(*results)
+            # return them
+            return ids, embeddings
+        else:
+            # Get all relevant results from the db, then we will create the dictionary
+            items = self.con.sql(
+                f"""SELECT d1_reference_id, record_id, is_d2, embeddings from {self.TABLE_NAME} where model = '{model}' and d1_reference_id in {record_ids}"""
+            ).fetchall()
+
+            embeddings_dict = {}
+
+            for i in tqdm(
+                range(len(items)), total=len(items), desc="Gathering embeddings"
+            ):
+                """Item contains the following:
+                [0] d1_reference_id
+                [1] record_id
+                [2] is_d2
+                [3] embeddings
+                """
+                item = items[i]
+
+                # TODO: TEST THIS
+                # if the d1_reference_id is not in the dictionary add it
+                if item[0] not in embeddings_dict:
+                    embeddings_dict[item[0]] = {
+                        "d1_embeddings": "",
+                        "d2_ids": [],
+                        "d2_embeddings": [],
+                    }
+                # If its not a d2_id its the embeddings for d1
+                # TODO: Change this to true
+                if item[2] == True:
+                    embeddings_dict[item[0]]["d1_embeddings"] = item[3]
+                # else it's the d2 embeddings. Here we will save the d2_id and the d2 embeddings
+                else:
+                    # Add d2 embeddings
+                    embeddings_dict[item[0]]["d2_embeddings"].append(item[3])
+                    # Add d2 id
+                    embeddings_dict[item[0]]["d2_ids"].append(item[1])
+
+            return embeddings_dict
 
     def calculate_metrics(
         self, metrics: dict, correct_d2_id: str, d2_candidate_ids: list, top_k: int
@@ -211,9 +259,7 @@ class SimilarityCalculator:
                 # count as correct
                 metrics[k]["TP"] += 1
                 # all others in top_k are considered FP
-                # TODO: This here in some cases is: len(d2_candidate_ids) - 1
-                # As the list may have less than k elements
-                metrics[k]["FP"] += max(k, len(d2_candidate_ids)) - 1
+                metrics[k]["FP"] += min(k, len(d2_candidate_ids)) - 1
             # if it's not in the top_k
             else:
                 # we have as many FP as K
@@ -310,7 +356,7 @@ class SimilarityCalculator:
         start_time, end_time = self.con.sql(
             f"""
             SELECT min(created_at), max(created_at)
-            FROM embeddings
+            FROM {self.TABLE_NAME}
             WHERE model = '{model}'
             """
         ).fetchone()
@@ -320,9 +366,9 @@ class SimilarityCalculator:
 
         # if it's less than one hour return in minutes
         if elapsed_time < datetime.timedelta(hours=1):
-            return f'{elapsed_time.total_seconds() / 60:.2f} minutes'
+            return f"{elapsed_time.total_seconds() / 60:.2f} minutes"
         else:
-            return f'{elapsed_time.total_seconds() / 3600:.2f} hours'
+            return f"{elapsed_time.total_seconds() / 3600:.2f} hours"
 
     def save_report(self, data: dict, sep: str = ",") -> None:
         """Save the sstatistics in a csv file
@@ -332,7 +378,7 @@ class SimilarityCalculator:
         """
 
         # Add the total generation time to the results
-        data['EMBEDDINGS_GENERATION_TIME'] = self.get_embeddings_generation_time(
+        data["EMBEDDINGS_GENERATION_TIME"] = self.get_embeddings_generation_time(
             model=data["EMBEDDING_MODEL"]
         )
 
@@ -350,8 +396,10 @@ class SimilarityCalculator:
         else:
             df.to_csv(self.csv_path, index=False, mode="a", sep=sep, header=False)
 
-    def calculate_similarities(
-        self, metric: SimilarityMetric, embedding_model: Embedding_Models
+    def calculate_similarities_simple(
+        self,
+        metric: SimilarityMetric,
+        embedding_model: Embedding_Models,
     ):
         """Calculate similarities using the requested metric and embedding model
 
@@ -420,6 +468,11 @@ class SimilarityCalculator:
         ), "The was an error with the embeddings retrieval for d2"
 
         d2_vectors = np.vstack(d2_embeddings).astype("float32")
+
+        # Normalize the data if required
+        if self.normalize:
+            d1_vectors = self._normalize(d1_vectors, p=2, axis=1)
+            d2_vectors = self._normalize(d2_vectors, p=2, axis=1)
 
         # perform faiss search
 
@@ -500,3 +553,173 @@ class SimilarityCalculator:
         # If requested also save the data to a csv file
         if self.to_csv:
             self.save_report(data=stats)
+
+    def calculate_similarities_task(
+        self,
+        metric: SimilarityMetric,
+        embedding_model: Embedding_Models,
+        use_task: bool = True,
+    ):
+        """Calculate the embeddings from the task"""
+
+        computed_similarities = {
+            "d1_id": [],
+            "sorted_d2_ids": [],
+            "scores": [],
+            "predicted_d2_id": [],
+        }
+
+        # first create the index
+        self.faiss_index = self.initialize_faiss(
+            embedding_model=embedding_model, similarity_metric=metric
+        )
+
+        """
+        Now get the embeddings from the db
+        In this case, we have calculated the d2 embeddings based on d1
+        So we will get a dictionary with the following structure
+        {
+            "d1_id" : {
+                "d2_ids" : [d2_id_1, d2_id_2, ...]
+                "d2_embeddings : [d2_embeddings_1, d2_embeddings_2]
+            },
+            ...
+        }
+        """
+        embeddings_dict = self.get_embeddings_from_db(
+            record_ids=list(self.pairs.keys()),
+            dataset="d1",
+            model=embedding_model,
+            use_task=use_task,
+        )
+
+        # We can now perform the search
+        # Since we want to compare our findings with the llm predictions
+        # For each d1_id we will create the index and search ONLY the d2_vectors that are of relevance
+        # We can find these using the two dicionaries we have created
+        for d1_id in tqdm(
+            self.pairs.keys(),
+            total=len(self.pairs),
+            desc=f"Calculating {metric} similarities",
+        ):
+            # first get the embeddings for the d1_id
+            d1_vector = embeddings_dict[d1_id]["d1_embeddings"]
+            # Convert to an array
+            # float32 type is required from the FAISS documentation
+            # https://github.com/facebookresearch/faiss/wiki/Getting-started
+            d1_vector = np.array(d1_vector).astype("float32")
+            # Here the shape is (emb_length, )
+            # We will add one more dim to apply the normalization
+            d1_vector = d1_vector.reshape(1, d1_vector.shape[0])
+
+            # Now do the same for d2. Since we have many neighbors for each d1
+            # We have to do this in a loop
+            d2_ids = embeddings_dict[d1_id]["d2_ids"]
+            # Create a helper dictionary
+            d2_ids_to_vector_ids = {
+                d2_id: idx for idx, d2_id in enumerate(embeddings_dict[d1_id]["d2_ids"])
+            }
+
+            d2_vectors = []
+            for d2_embedding in embeddings_dict[d1_id]["d2_embeddings"]:
+                # Add the vectors to the embeddings list
+                d2_vectors.append(d2_embedding)
+
+            # Convert the list to a numpy array
+            d2_vectors = np.vstack(d2_vectors).astype("float32")
+
+            # NOTE: Here we have not make any changes to the order so
+            # if needed we can use the d2_ids_to_vector_ids for indexing
+
+            # Now Normalize the data if required
+            if self.normalize:
+                d1_vector = self._normalize(d1_vector, p=2, axis=1)
+                d2_vectors = self._normalize(d2_vectors, p=2, axis=1)
+
+            # perform faiss search
+
+            # Per the documentation if the given distance is "cosine"
+            # we have to normalize_L2 the datasets in order for our code to work
+            if metric == SimilarityMetric.COSINE:
+                faiss.normalize_L2(d1_vector)
+                faiss.normalize_L2(d2_vectors)
+
+            # first reset the index
+            self.faiss_index.reset()
+
+            self.faiss_index.add(d2_vectors)
+
+            # We are now ready to perform the actual search
+            distances, neighbors = self.faiss_index.search(
+                d1_vector, len(self.pairs[d1_id])
+            )
+
+            # Fix how euclidian distances appear
+            if metric == SimilarityMetric.EUCLIDIAN:
+                distances = 1 / (1 + distances)
+
+            # neighbors will have a shape of (1, num_neighbors)
+            # We want to get rid of the first dimention so we will flatten
+            neighbors = neighbors.flatten().tolist()
+            # same thing for the distances
+            distances = distances.flatten().tolist()
+
+            # Finally sort the ids by their distances in desc order
+            # sorted_distances, sorted_d2_ids = self.sort_by_field(scores=distances, neighbor_ids=neighbors, d2_ids=self.pairs[d1_id])
+            sorted_d2_ids = self.sort_by_field(
+                scores=distances, neighbor_ids=neighbors, d2_ids=self.pairs[d1_id]
+            )
+
+            # Keep this data in a dictionary
+            # We will later convert this to a csv
+            computed_similarities["d1_id"].append(d1_id)
+            computed_similarities["sorted_d2_ids"].append(sorted_d2_ids)
+            computed_similarities["scores"].append(distances)
+            computed_similarities["predicted_d2_id"].append(sorted_d2_ids[0])
+
+        # Create a dataframe with the info
+        df = pd.DataFrame(computed_similarities)
+
+        stats = self.extract_statistics(
+            df, embedding_model=embedding_model, similarity_metric=metric
+        )
+
+        self.print_statistics(statistics=stats)
+
+        # If requested also save the data to a csv file
+        if self.to_csv:
+            self.save_report(data=stats)
+
+    def calculate_similarities(
+        self,
+        metric: SimilarityMetric,
+        embedding_model: Embedding_Models,
+        use_task=False,
+    ):
+        """Calculate similarities using the requested metric and embedding model
+
+        Those similarities will be calculated on the results of blocking
+        As such we have to also access the corresponding blocking files
+
+        We have two options
+        1) Normal embeddings
+        2) Embeddings using task
+
+        In the second case we have to look to another db table
+        From there we can take for each d1 all the relevant d2 vectors
+        """
+
+        # Set the constant for the table name depending on the use_task flag
+        if not use_task:
+            self.TABLE_NAME = "embeddings"
+        else:
+            self.TABLE_NAME = "task_embeddings"
+
+        if not use_task:
+            self.calculate_similarities_simple(
+                metric=metric, embedding_model=embedding_model
+            )
+        else:
+            self.calculate_similarities_task(
+                metric=metric, embedding_model=embedding_model, use_task=use_task
+            )
