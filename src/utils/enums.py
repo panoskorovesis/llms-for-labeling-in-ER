@@ -36,13 +36,17 @@ class Embedding_Models(Enum):
     BGE_EN_ICL = 8
     E5_MISTRAL_7B = 9
     GEMMA_2 = 10
+    SFR_EMBEDDING_MISTRAL = 11
+    GEMMA_EMBEDDINGS = 12
+    FALCON_3 = 13
+    PHI_3 = 14
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
         if self.name == "ROBERTA_LARGE":
             return "xlm-roberta-large"
         elif self.name == "QWEN_2_5_7B":
-            return "Qwen2.5-7B"
+            return "Qwen/Qwen2.5-7B-Instruct"
         elif self.name == "STELLA_EN":
             return "dunzhang/stella_en_1.5B_v5"
         elif self.name == "EMBER_V1":
@@ -58,7 +62,15 @@ class Embedding_Models(Enum):
         elif self.name == "E5_MISTRAL_7B":
             return "intfloat/e5-mistral-7b-instruct"
         elif self.name == "GEMMA_2":
-            return "gemma2:9b-instruct-q5_K_M"
+            return "google/gemma-2-9b-it"
+        elif self.name == "SFR_EMBEDDING_MISTRAL":
+            return "Salesforce/SFR-Embedding-Mistral"
+        elif self.name == "GEMMA_EMBEDDINGS":
+            return "google/Gemma-Embeddings-v1.0"
+        elif self.name == "FALCON_3":
+            return "tiiuae/Falcon3-10B-Instruct"
+        elif self.name == "PHI_3":
+            return "microsoft/Phi-3-medium-128k-instruct"
 
 
 class Models(Enum):
@@ -87,6 +99,7 @@ class Models(Enum):
     GEMMA_2 = 6
     SOLAR = 7
     GRANITE_CODE = 8
+    FALCON_3 = 10
 
     def __str__(self) -> str:
         """Return the appropriate model name
@@ -110,6 +123,8 @@ class Models(Enum):
             return "solar-pro:22b"
         elif self.name == "GRANITE_CODE":
             return "granite-code:20b-instruct-8k-q5_K_M"
+        elif self.name == "FALCON_3":
+            return "falcon3:10b-instruct-q8_0"
 
 
 class PromptTypes(Enum):
