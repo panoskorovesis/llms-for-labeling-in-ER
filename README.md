@@ -25,6 +25,8 @@ We used:
 1. different SOTA embeddings models, many of which can be found on the [MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
 2. Some of the decoder only LLMs from the first method, in order to study their performance at the embedding generation task
 
+__We contribute a embeddings benchmark on several established Entity Resolution Datasets__, using different open source models.
+
 The complete list is as follows:
 
 __Embedding Models__:
