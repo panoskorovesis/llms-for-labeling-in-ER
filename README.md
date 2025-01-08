@@ -1,4 +1,4 @@
-# Leveraging LLMs for Entiry Resolution
+# Leveraging LLMs for Entity Resolution
 
 ## Prompting
 
