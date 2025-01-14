@@ -1,4 +1,4 @@
-# Leveraging LLMs for Entity Resolution
+# LLaMoT: **L**everaging **L**arge L**a**nguage **Mo**dels for Entity Resolu**t**ion
 
 ## Prompting
 
