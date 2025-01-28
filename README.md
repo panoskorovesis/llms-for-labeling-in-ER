@@ -34,8 +34,8 @@ __Embedding Models__:
 1. dunzhang/stella_en_1.5B_v5
 1. llmrails/ember-v1
 1. BAAI/bge-m3
-1. BAAI/bge-multilingual-gemma2
 1. BAAI/bge-en-icl
+1. Alibaba-NLP/gte-Qwen2-7B-instruct (?)
 1. sentence-transformers/all-MiniLM-L6-v2
 1. sentence-transformers/all-MiniLM-L12-v2
 1. intfloat/e5-mistral-7b-instruct
