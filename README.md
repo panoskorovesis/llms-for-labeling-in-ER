@@ -45,4 +45,4 @@ __Embedding Models__:
 __LLMs__:
 
 1. Qwen/Qwen2.5-7B-Instruct
-2. google/gemma-2-9b-it
+2. microsoft/Phi-3-medium-128k-instruct
