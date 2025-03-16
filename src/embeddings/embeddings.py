@@ -59,6 +59,20 @@ class Embedder:
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # Set some examples for BAAI/bge-en-icl
+        self.examples = [
+            {
+                "instruct": "Given a web search query, retrieve relevant passages that answer the query.",
+                "query": "what is a virtual interface",
+                "response": "A virtual interface is a software-defined abstraction that mimics the behavior and characteristics of a physical network interface. It allows multiple logical network connections to share the same physical network interface, enabling efficient utilization of network resources. Virtual interfaces are commonly used in virtualization technologies such as virtual machines and containers to provide network connectivity without requiring dedicated hardware. They facilitate flexible network configurations and help in isolating network traffic for security and management purposes.",
+            },
+            {
+                "instruct": "Given a web search query, retrieve relevant passages that answer the query.",
+                "query": "causes of back pain in female for a week",
+                "response": "Back pain in females lasting a week can stem from various factors. Common causes include muscle strain due to lifting heavy objects or improper posture, spinal issues like herniated discs or osteoporosis, menstrual cramps causing referred pain, urinary tract infections, or pelvic inflammatory disease. Pregnancy-related changes can also contribute. Stress and lack of physical activity may exacerbate symptoms. Proper diagnosis by a healthcare professional is crucial for effective treatment and management.",
+            },
+        ]
+
         # Load the tokenizer and the model
         self.tokenizer, self.model = self.load_tokenizer_and_model(model)
 
@@ -81,9 +95,8 @@ class Embedder:
         traditional_models = {
             Embedding_Models.ROBERTA_LARGE,
             Embedding_Models.QWEN_2_5_7B,
-            Embedding_Models.GEMMA_2,
             Embedding_Models.E5_MISTRAL_7B,
-            Embedding_Models.PHI_3
+            Embedding_Models.PHI_3,
         }
 
         sentence_transformers = {
@@ -92,6 +105,7 @@ class Embedder:
             Embedding_Models.STELLA_EN,
             Embedding_Models.MINI_LM_L12_V2,
             Embedding_Models.SFR_EMBEDDING_MISTRAL,
+            Embedding_Models.GTE_QWEN2
         }
 
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
@@ -120,7 +134,13 @@ class Embedder:
             emb_model = BGEM3FlagModel(str(model), use_fp16=True)
         elif model in baai_icl_models:
             tokenizer = None
-            emb_model = FlagICLModel(str(model), use_fp16=True)
+            emb_model = FlagICLModel(
+                str(model),
+                use_fp16=True,
+                devices=["cpu"],
+                query_instruction_for_retrieval="Retrieve semantically similar text.",
+                examples_for_task=self.examples,
+        )
         else:
             raise ValueError(f"Model: {str(model)} is not currently supported!")
 
@@ -144,7 +164,7 @@ class Embedder:
 
         if self.verbose:
             print(
-                f'Duck db connection initialized! Tables: \n{con.sql("SHOW TABLES;")}'
+                f"Duck db connection initialized! Tables: \n{con.sql('SHOW TABLES;')}"
             )
 
         return con
@@ -169,6 +189,7 @@ class Embedder:
             self.con.sql(f"""
             CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
                 record_id VARCHAR NOT NULL,
+                dataset VARCHAR NOT NULL,
                 embeddings FLOAT[] NOT NULL,
                 created_at TIMESTAMP NOT NULL,
                 model VARCHAR NOT NULL
@@ -470,13 +491,28 @@ class Embedder:
                 max_length=8192,  # This is the proposed lengh. We can make it smaller if we want
             )["dense_vecs"]
         elif self.e_model == Embedding_Models.BGE_EN_ICL:
-            raise NotImplementedError("BGE_EN_ICL Not yet implemented")
+            # TODO: Add a case here for use_task and not use_task
+            # Link: https://huggingface.co/BAAI/bge-en-icl
+            embeddings = self.model.encode(
+                [text],
+                max_length=8192,  # This is the proposed lengh. We can make it smaller if we want
+            )
         else:
-            embeddings = self.model.encode([text])
-        # here the shape is (1, embeddings_size)
+            # NOTE: Here the input can either be str or a list
+            # If it's str we want to add a list
+            # str should come for use_task=False
+            # otherwise it should be a list
+            if isinstance(text, str):
+                text = [text]
+
+            embeddings = self.model.encode(text)
+        # here the shape is (1, embeddings_size) for use_task = False
+        # and (N, embeddings_size) otherwise
         # to make things easier for further calculations we will flatten
+        # ONLY FOR use_task = False
         # the final shape will be (embeddings_size,)
-        embeddings = embeddings.flatten()
+        if not self.use_task:
+            embeddings = embeddings.flatten()
 
         return embeddings
 
@@ -532,7 +568,7 @@ class Embedder:
         Instruct: Given a web search query, retrieve relevant passages that answer the query
         """
 
-        TASK_DESCRIPTION = "Retrieve semantically similar text."
+        TASK_DESCRIPTION = "Given a query, retrieve semantically similar text."
 
         # We dont need a dataset name here since each db has one of it's own
         completed_ids = self.get_completed_embeddings(
@@ -591,6 +627,78 @@ class Embedder:
                         model=self.e_model,
                     )
 
+    def embed_sentences_with_task(
+        self, d1_records: dict, d2_records: dict, pairs: dict
+    ):
+        """Generate embeddings using the AutoModel and an additional task
+
+        This is the method proposed here: https://huggingface.co/intfloat/e5-mistral-7b-instruct
+
+        We will do this in batches. Each batch contains the
+        1. d1 record (which is the TASK)
+        2. All relevant d2_records (which are the documents)
+
+        Due to the fact that d2 documents can appear multiple times for
+
+        The task description will be
+        Retrieve semantically similar text.
+        OR
+        Instruct: Given a web search query, retrieve relevant passages that answer the query
+        """
+
+        TASK_DESCRIPTION = "Given a query, retrieve semantically similar text."
+
+        # We dont need a dataset name here since each db has one of it's own
+        completed_ids = self.get_completed_embeddings(
+            model=self.e_model, dataset_name=None
+        )
+
+        # For each pair in the self.pairs dictionary
+        for d1_id, d2_candidate_ids in tqdm(
+            pairs.items(), total=len(pairs), desc="Generating Task Embeddings"
+        ):
+            if d1_id in completed_ids:
+                if self.verbose:
+                    print(
+                        f"Task Embeddings already generated for {d1_id}, {self.e_model}"
+                    )
+                continue
+
+            # Locate the text for d1
+            # Also apply the instruction
+            d1_text = self.get_detailed_instruct(
+                task_description=TASK_DESCRIPTION, query=d1_records[d1_id]
+            )
+            # Locate the texts for d2
+            d2_texts = [d2_records[d2_id] for d2_id in d2_candidate_ids]
+
+            # At this point we want to merge the two keeping the d1_text at the top
+            input_texts = [d1_text] + d2_texts
+
+            # Now generate the embeddings
+            embeddings = self.generate_sentence_embeddings(input_texts)
+
+            # Finally we have to add the embeddings to the db table
+            for idx, emb in enumerate(embeddings):
+                # if idx == 0 then we are talking about the d1 record
+                if idx == 0:
+                    self.save_task_embeddings_to_db(
+                        record_id=d1_id,
+                        d1_reference_id=d1_id,
+                        is_d2=False,
+                        embeddings=embeddings[idx][:],
+                        model=self.e_model,
+                    )
+                else:
+                    self.save_task_embeddings_to_db(
+                        # NOTE: We have to add -1 here since we are counting from 0
+                        record_id=d2_candidate_ids[idx - 1],
+                        d1_reference_id=d1_id,
+                        is_d2=True,
+                        embeddings=embeddings[idx][:],
+                        model=self.e_model,
+                    )
+
     def embed(self, restart: bool = False):
         # First create the table and the column if needed
         self.create_db_table_if_needed(force=restart)
@@ -600,7 +708,10 @@ class Embedder:
             print(f"Switching model to: {self.device}")
 
         # This applied to all except BAAI Models
-        if self.e_model != Embedding_Models.BGE_M3:
+        if (
+            self.e_model != Embedding_Models.BGE_M3
+            and self.e_model != Embedding_Models.BGE_EN_ICL
+        ):
             self.model = self.model.to(self.device)
 
         # If it's a traditional model then the self.tokenizer attribute wont be null
@@ -616,8 +727,15 @@ class Embedder:
                 d1_records=self.d1_records, d2_records=self.d2_records, pairs=self.pairs
             )
         # if the tokenizer is none then we have a sentence transformer
-        else:
+        elif not self.use_task:
             # generate embeddings for d1
             self.embed_sentences(records=self.d1_records, dataset_name="d1")
             # generate embeddings for d2
             self.embed_sentences(records=self.d2_records, dataset_name="d2")
+
+        # If a task is required for the sentence transformers
+        else:
+            # generate embeddings
+            self.embed_sentences_with_task(
+                d1_records=self.d1_records, d2_records=self.d2_records, pairs=self.pairs
+            )
