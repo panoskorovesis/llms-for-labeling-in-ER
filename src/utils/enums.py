@@ -35,11 +35,10 @@ class Embedding_Models(Enum):
     BGE_M3 = 7
     BGE_EN_ICL = 8
     E5_MISTRAL_7B = 9
-    GEMMA_2 = 10
-    SFR_EMBEDDING_MISTRAL = 11
-    GEMMA_EMBEDDINGS = 12
-    FALCON_3 = 13
-    PHI_3 = 14
+    SFR_EMBEDDING_MISTRAL = 10
+    GEMMA_EMBEDDINGS = 11
+    PHI_3 = 12
+    GTE_QWEN2 = 13
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -61,16 +60,14 @@ class Embedding_Models(Enum):
             return "BAAI/bge-en-icl"
         elif self.name == "E5_MISTRAL_7B":
             return "intfloat/e5-mistral-7b-instruct"
-        elif self.name == "GEMMA_2":
-            return "google/gemma-2-9b-it"
         elif self.name == "SFR_EMBEDDING_MISTRAL":
             return "Salesforce/SFR-Embedding-Mistral"
         elif self.name == "GEMMA_EMBEDDINGS":
             return "google/Gemma-Embeddings-v1.0"
-        elif self.name == "FALCON_3":
-            return "tiiuae/Falcon3-10B-Instruct"
         elif self.name == "PHI_3":
-            return "microsoft/Phi-3-medium-128k-instruct"
+            return "microsoft/Phi-3.5-mini-instruct"
+        elif self.name == "GTE_QWEN2":
+            return "Alibaba-NLP/gte-Qwen2-7B-instruct"
 
 
 class Models(Enum):
@@ -100,6 +97,8 @@ class Models(Enum):
     SOLAR = 7
     GRANITE_CODE = 8
     FALCON_3 = 10
+    PHI_4 = 11
+    DEEPSEEK_R1 = 12
 
     def __str__(self) -> str:
         """Return the appropriate model name
@@ -125,6 +124,10 @@ class Models(Enum):
             return "granite-code:20b-instruct-8k-q5_K_M"
         elif self.name == "FALCON_3":
             return "falcon3:10b-instruct-q8_0"
+        elif self.name == "PHI_4":
+            return "phi4:14b"
+        elif self.name == "DEEPSEEK_R1":
+            return "deepseek-r1:14b"
 
 
 class PromptTypes(Enum):
@@ -250,9 +253,9 @@ class Prompt:
         # If it's the MATCHING
         if prompt_type in PromptGroups.MATCHING_GROUP.value:
             # The record options must have a size of 1
-            assert (
-                len(candidate_records) == 1
-            ), "For the MATCHING PROMPT, the record options must contain ONLY ONE OPTION"
+            assert len(candidate_records) == 1, (
+                "For the MATCHING PROMPT, the record options must contain ONLY ONE OPTION"
+            )
 
             prompt = prompt.replace("RECORD_PLACEHOLDER", record).replace(
                 "RECORD_OPTION_PLACEHOLDER_1", candidate_records[0]
@@ -262,9 +265,9 @@ class Prompt:
         # If it's the comparing prompt
         elif prompt_type in PromptGroups.COMPARING_GROUP.value:
             # The record options must have a size of 2
-            assert (
-                len(candidate_records) == 2
-            ), "For the COMPARING PROMPT, the record options must contain EXACTLY TWO OPTIONS"
+            assert len(candidate_records) == 2, (
+                "For the COMPARING PROMPT, the record options must contain EXACTLY TWO OPTIONS"
+            )
 
             prompt = (
                 prompt.replace("RECORD_PLACEHOLDER", record)
