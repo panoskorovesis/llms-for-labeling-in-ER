@@ -551,7 +551,7 @@ class BruteForce:
             ####################
             ####################
             ####################
-            # STEP 1 - COMPARING
+            # STEP 2 - COMPARING
             ####################
             ####################
             ####################
@@ -617,7 +617,7 @@ class BruteForce:
             ####################
             ####################
             ####################
-            # STEP 1 - SELECTING
+            # STEP 3 - SELECTING
             ####################
             ####################
             ####################
@@ -712,6 +712,10 @@ class BruteForce:
             server_url=self.config["ollama"]["url"],
             verbose=self.verbose,
         )
+
+        # If the model is DEEPSEEK_R1 We want more tokens to allow the thinking process
+        if model == Models.DEEPSEEK_R1:
+            num_predict = 8192
 
         if mode == BruteForceMode.MATCHING:
             self.run_matching(
