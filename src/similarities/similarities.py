@@ -34,6 +34,8 @@ class SimilarityCalculator:
         self.csv_separator = csv_separator
         self.to_csv = to_csv
         self.normalize = normalize
+        # initialize to None, will take value in calculate_similarities
+        self.use_task = None
 
         # load the pairs.json file
         with open(pairs_path, "r") as fp:
@@ -217,8 +219,7 @@ class SimilarityCalculator:
                         "d2_embeddings": [],
                     }
                 # If its not a d2_id its the embeddings for d1
-                # TODO: Change this to true
-                if item[2] == True:
+                if not item[2]:
                     embeddings_dict[item[0]]["d1_embeddings"] = item[3]
                 # else it's the d2 embeddings. Here we will save the d2_id and the d2 embeddings
                 else:
@@ -376,6 +377,10 @@ class SimilarityCalculator:
         The file name will be similarities.csv
         The easiest way to do this is cast the dict to a csv and use pandas
         """
+
+        # Add the use_task column
+        # This will be true of false
+        data['use_task'] = self.use_task
 
         # Add the total generation time to the results
         data["EMBEDDINGS_GENERATION_TIME"] = self.get_embeddings_generation_time(
@@ -708,6 +713,10 @@ class SimilarityCalculator:
         In the second case we have to look to another db table
         From there we can take for each d1 all the relevant d2 vectors
         """
+
+        # Set the use_task attr to the argument
+        # This will be added as a column in the produced csv
+        self.use_task = use_task
 
         # Set the constant for the table name depending on the use_task flag
         if not use_task:
