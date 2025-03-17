@@ -1,5 +1,9 @@
 # python venv
 .venv/
+.tempvenv/
+
+# enviromental files
+.env
 
 # python cache
 *.pyc
