@@ -184,10 +184,8 @@ class Evaluator:
         FN = len(gt_d1_ids - d1_ids)
 
         metrics = {
-            # Accuracy = Correct / All or (TP + TN) / (TP + TN + FP + FN)
-            "Accuracy": float(TP) / len(predicted_pairs)
-            if len(predicted_pairs) != 0
-            else 0.0,
+            # Accuracy = TP / (TP + FP + FN) - ratio of correct matches to all relevant pairs
+            "Accuracy": float(TP) / (TP + FP + FN) if (TP + FP + FN) != 0 else 0.0,
             # Precision = Correct / All positive or TP / (TP + FP)
             "Precision": float(TP) / (TP + FP) if (TP + FP) != 0 else 0.0,
             # Recall = Correct / All Correct or (TP) / (TP + FN)
