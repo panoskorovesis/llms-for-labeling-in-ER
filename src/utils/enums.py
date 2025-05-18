@@ -217,7 +217,7 @@ class Prompt:
         """,
         # This is the SELECTING prompt from the paper https://arxiv.org/pdf/2405.16884
         PromptTypes.SELECTING_PROMPT: """
-        Select a record from the following candidates that refers to the same real-world entity as the given record. Answer with the corresponding record number surrounded by "[]" or "[0]" if there is none.
+        Select a record from the following candidates that refers to the same real-world entity as the given record. Answer ONLY with the corresponding record number surrounded by "[]" or "[0]" if there is none.
         Given entity record: RECORD_PLACEHOLDER
         """,
         # TODO: SELECTING_PROMPT ONLY
@@ -283,5 +283,8 @@ class Prompt:
             # Add the record options
             for idx, record_option in enumerate(candidate_records):
                 prompt += f"[{idx + 1}] {record_option}\n"
+
+            # Add "The answer is:" at the end of the prompt
+            prompt += "\nThe answer is:"
 
             return prompt
