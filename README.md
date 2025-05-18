@@ -35,14 +35,8 @@ __Embedding Models__:
 1. llmrails/ember-v1
 1. BAAI/bge-m3
 1. BAAI/bge-en-icl
-1. Alibaba-NLP/gte-Qwen2-7B-instruct (?)
+1. Alibaba-NLP/gte-Qwen2-7B-instruct
 1. sentence-transformers/all-MiniLM-L6-v2
 1. sentence-transformers/all-MiniLM-L12-v2
 1. intfloat/e5-mistral-7b-instruct
 1. Salesforce/SFR-Embedding-Mistral
-1. google/Gemma-Embeddings-v1.0
-
-__LLMs__:
-
-1. Qwen/Qwen2.5-7B-Instruct
-2. microsoft/Phi-3-medium-128k-instruct
