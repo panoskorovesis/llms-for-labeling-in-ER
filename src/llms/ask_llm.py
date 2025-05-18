@@ -121,12 +121,21 @@ class LLM:
         if rsp.get("response") is None:
             return ValidationStatus.NO_RESPONSE, ""
 
-        # First clean the text
-        text = self.remove_punctuation(rsp["response"]).lower()
+        # If the model is DEEPSEEK_R1 </think> MUST be in the output
+        if self.model == Models.DEEPSEEK_R1 and "</think>" not in rsp["response"]:
+            print("</THINK> MISSING FROM OUTPUT. NUM_PREDICT MAY BE TOO SMALL!")
+            return ValidationStatus.INVALID, ""
 
         print(
-            f"------------------RAW RSP---------------------\n{text}\n----------------------------------------------\n\n"
+            f"------------------RAW RSP---------------------\n{rsp['response']}\n----------------------------------------------\n\n"
         )
+
+        # Also if the model is DEEPSEEK_R1 we have to exclude the thinking tokens from the parsing
+        if self.model == Models.DEEPSEEK_R1:
+            rsp["response"] = rsp["response"].lower().split("</think>")[-1].strip()
+
+        # First clean the text
+        text = self.remove_punctuation(rsp["response"]).lower()
 
         if prompt_type in PromptGroups.MATCHING_GROUP.value:
             # Here the expected answers should be "Yes" or "No"
@@ -177,12 +186,31 @@ class LLM:
             """Here the value must be a valid number
             Normally it should be in [] but the models tend to ignore this command
             So we want to check THE FIRST WORD
+
+            If the model is DEEPSEEK_R1 Check the last word
+            For other cases check the first or the last word
             """
-            word = text.strip().split(" ")[0]
+
+            # First check if "the answer is" is in the text
+            if "the answer is" in text:
+                # Remove the "the answer is" part
+                text = text.split("the answer is")[-1].strip()
+
+            if self.model != Models.DEEPSEEK_R1:
+                first_word = text.strip().split(" ")[0]
+                last_word = text.strip().split(" ")[-1]
+            # Handle DEEPSEEK
+            else:
+                word = text.split()[-1]
+
+            # Check if one of the two is a number
+            if self.model != Models.DEEPSEEK_R1:
+                word = first_word if first_word.isdigit() else last_word
 
             try:
-                if int(word) <= max_number:
-                    return ValidationStatus.VALID, int(word)
+                selection_number = int(word)
+                if selection_number <= max_number:
+                    return ValidationStatus.VALID, selection_number
                 # Answer is out of bounds
                 else:
                     print(
@@ -198,7 +226,11 @@ class LLM:
             raise ValueError(f"Prompt Type: {prompt_type} is not Supported!")
 
     def send_request(
-        self, prompt: str, temperature: float, num_predict: int = 128, max_input_tokens: int =2048
+        self,
+        prompt: str,
+        temperature: float,
+        num_predict: int = 128,
+        max_input_tokens: int = 2048,
     ) -> str:
         """Send a request to the LLM server.
 
@@ -231,10 +263,14 @@ class LLM:
             "model": str(self.model),
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": num_predict, "num_ctx": max_input_tokens},
+            "options": {
+                "temperature": temperature,
+                "num_predict": num_predict,
+                "num_ctx": max_input_tokens,
+            },
         }
 
-        print(f'Context Lengh: {max_input_tokens}')
+        print(f"Context Lengh: {max_input_tokens}")
 
         for i in range(self.max_request_tries):
             try:
@@ -287,9 +323,7 @@ class LLM:
 
         if len(tokens) > max_tokens:
             if self.verbose:
-                print(
-                    f"Prompt has {len(tokens)} tokens! We will keep: {max_tokens}"
-                )
+                print(f"Prompt has {len(tokens)} tokens! We will keep: {max_tokens}")
 
             tokens_to_keep = max_tokens - 100
             # Truncate, keeping the last 100
@@ -334,7 +368,10 @@ class LLM:
 
         # send the request
         rsp = self.send_request(
-            prompt=prompt, temperature=temperature, num_predict=num_predict, max_input_tokens=max_tokens
+            prompt=prompt,
+            temperature=temperature,
+            num_predict=num_predict,
+            max_input_tokens=max_tokens,
         )
 
         # in case of error -> None
