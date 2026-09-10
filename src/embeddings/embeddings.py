@@ -39,7 +39,7 @@ class Embedder:
 
         # Set the constant for the table name
         if not self.use_task:
-            self.TABLE_NAME = "embeddings"
+            self.TABLE_NAME = "embeddings_optimal"
         else:
             self.TABLE_NAME = "task_embeddings"
 
@@ -105,7 +105,12 @@ class Embedder:
             Embedding_Models.STELLA_EN,
             Embedding_Models.MINI_LM_L12_V2,
             Embedding_Models.SFR_EMBEDDING_MISTRAL,
-            Embedding_Models.GTE_QWEN2
+            Embedding_Models.GTE_QWEN2,
+            Embedding_Models.OCTEN_EMBEDDING_4B,
+        }
+
+        jasper_models = {
+            Embedding_Models.JASPER_TOKEN_COMPRESSION,
         }
 
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
@@ -129,6 +134,18 @@ class Embedder:
                 device=self.device,
                 trust_remote_code=True,
             )
+        elif model in jasper_models:
+            print(f"Loading Jasper model: {str(model)}")
+            tokenizer = None
+            emb_model = SentenceTransformer(
+                str(model),
+                device=self.device,
+                model_kwargs={
+                    "torch_dtype": torch.bfloat16,
+                    "attn_implementation": "sdpa",
+                },
+                trust_remote_code=True,
+            )
         elif model in baai_models:
             tokenizer = None
             emb_model = BGEM3FlagModel(str(model), use_fp16=True)
@@ -140,7 +157,7 @@ class Embedder:
                 devices=["cpu"],
                 query_instruction_for_retrieval="Retrieve semantically similar text.",
                 examples_for_task=self.examples,
-        )
+            )
         else:
             raise ValueError(f"Model: {str(model)} is not currently supported!")
 
@@ -339,6 +356,41 @@ class Embedder:
             ],
         )
 
+    def save_embeddings_to_db_bulk(
+        self,
+        embeddings: dict,
+        model: Embedding_Models,
+        dataset_name: str,
+    ):
+        # The first method is to create a dataframe and then insert it
+        # The second is to perform a bulk insert
+
+        # NOTE: Embeddings is a dict with the following structure
+        # {
+        #     "record_id": {
+        #         "embeddings": np.array,
+        #         "created_at": datetime.datetime.now(),
+        #     }
+        # }
+
+        # Create a dataframe
+        # Do not change the index since it's the record_id
+        df = pd.DataFrame.from_dict(embeddings, orient="index")
+
+        # Add the missing columns
+        df["record_id"] = df.index
+        df["dataset"] = dataset_name
+        df["model"] = str(model)
+
+        print(df.info())
+
+        # Insert the dataframe into the db
+        self.con.execute(
+            f"""
+            INSERT INTO {self.TABLE_NAME} SELECT record_id, dataset, embeddings, created_at, model FROM df
+            """
+        )
+
     def save_task_embeddings_to_db(
         self,
         record_id: str,
@@ -502,8 +554,8 @@ class Embedder:
             # If it's str we want to add a list
             # str should come for use_task=False
             # otherwise it should be a list
-            if isinstance(text, str):
-                text = [text]
+            # if isinstance(text, str):
+            # text = [text]
 
             embeddings = self.model.encode(text)
         # here the shape is (1, embeddings_size) for use_task = False
@@ -511,7 +563,7 @@ class Embedder:
         # to make things easier for further calculations we will flatten
         # ONLY FOR use_task = False
         # the final shape will be (embeddings_size,)
-        if not self.use_task:
+        if not self.use_task and embeddings.shape[0] == 1:
             embeddings = embeddings.flatten()
 
         return embeddings
@@ -525,12 +577,17 @@ class Embedder:
             model=self.e_model, dataset_name=dataset_name
         )
 
+        record_embeddings = {}
+
         # do a loop and generate the embeddings one by one
-        for idx, text in tqdm(
-            zip(ids, texts),
+        for i in tqdm(
+            range(len(ids)),
             total=len(texts),
             desc=f"Generating embeddings for {dataset_name}",
         ):
+            idx = ids[i]
+            text = texts[i]
+
             # if the id is in the completed skip
             if idx in completed:
                 if self.verbose:
@@ -541,13 +598,41 @@ class Embedder:
 
             embeddings = self.generate_sentence_embeddings(text=text)
 
-            # save them to the db
-            self.save_embeddings_to_db(
-                idx,
-                embeddings=embeddings,
-                model=self.e_model,
-                dataset_name=dataset_name,
-            )
+            # Initialize an empty dict for the record
+            record_embeddings[idx] = {}
+            # Fill the dict with the embeddings and creation timestamp
+            record_embeddings[idx]["embeddings"] = embeddings
+            record_embeddings[idx]["created_at"] = datetime.datetime.now()
+
+        # If all the embeddings are already generated return
+        if len(record_embeddings) == 0:
+            if self.verbose:
+                print(
+                    f"All embeddings are already generated for {dataset_name} - {self.e_model}. Will continue"
+                )
+            return
+
+        # Save the embeddings
+        self.save_embeddings_to_db_bulk(
+            embeddings=record_embeddings,
+            model=self.e_model,
+            dataset_name=dataset_name,
+        )
+
+        # # No go through the dict and save the embeddings
+        # for idx, embeddings in tqdm(
+        #     record_embeddings.items(),
+        #     total=len(record_embeddings),
+        #     desc=f"Saving embeddings for {dataset_name}",
+        # ):
+        #     # TODO: MAKE THIS FASTER && BATCH INSERT
+        #     # save them to the db
+        #     self.save_embeddings_to_db(
+        #         idx,
+        #         embeddings=embeddings,
+        #         model=self.e_model,
+        #         dataset_name=dataset_name,
+        #     )
 
     def embed_word_tokens_with_task(
         self, d1_records: dict, d2_records: dict, pairs: dict
