@@ -39,6 +39,8 @@ class Embedding_Models(Enum):
     GEMMA_EMBEDDINGS = 11
     PHI_3 = 12
     GTE_QWEN2 = 13
+    JASPER_TOKEN_COMPRESSION = 14
+    OCTEN_EMBEDDING_4B = 15
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -68,6 +70,10 @@ class Embedding_Models(Enum):
             return "microsoft/Phi-3.5-mini-instruct"
         elif self.name == "GTE_QWEN2":
             return "Alibaba-NLP/gte-Qwen2-7B-instruct"
+        elif self.name == "JASPER_TOKEN_COMPRESSION":
+            return "infgrad/Jasper-Token-Compression-600M"
+        elif self.name == "OCTEN_EMBEDDING_4B":
+            return "Octen/Octen-Embedding-4B"
 
 
 class Models(Enum):
