@@ -114,7 +114,7 @@ class SimilarityCalculator:
 
         if self.verbose:
             print(
-                f'Duck db connection initialized! Tables: \n{con.sql("SHOW TABLES;")}'
+                f"Duck db connection initialized! Tables: \n{con.sql('SHOW TABLES;')}"
             )
 
         return con
@@ -336,13 +336,18 @@ class SimilarityCalculator:
             statistics[f"top_{key}_precision"] = mertrics[key]["TP"] / (
                 mertrics[key]["TP"] + mertrics[key]["FP"]
             )
+            statistics[f"top_{key}_f1"] = (
+                2
+                * (statistics[f"top_{key}_recall"] * statistics[f"top_{key}_precision"])
+                / (statistics[f"top_{key}_recall"] + statistics[f"top_{key}_precision"])
+            )
 
         return statistics
 
     def print_statistics(self, statistics: dict):
         """Print statistics in a pretty way"""
 
-        label = f'------------- {statistics["EMBEDDING_MODEL"].upper()} - {statistics["SIMILARITY_METRIC"].upper()} -------------'
+        label = f"------------- {statistics['EMBEDDING_MODEL'].upper()} - {statistics['SIMILARITY_METRIC'].upper()} -------------"
 
         print("-" * len(label))
         print(label)
@@ -371,6 +376,53 @@ class SimilarityCalculator:
         else:
             return f"{elapsed_time.total_seconds() / 3600:.2f} hours"
 
+    def calculate_embeddings_generation_time(self, model: str, threshold: int):
+        """Calculate the total time elapsed during the embeddings generation process
+
+        The process is as follows:
+        1) Get all unique timestamps from the database
+        2) Calculate the total elapsed time
+        3) Return the total elapsed time in a human-readable format
+
+        The threshold is used to ignore time differences that exceed a certain value
+        """
+
+        # Step 1: Get all unique timestamps from the database
+        timestamps = self.con.sql(
+            f"""
+            SELECT DISTINCT created_at
+            FROM {self.TABLE_NAME}
+            WHERE model = '{model}'
+            ORDER BY created_at
+            """
+        ).fetchall()
+
+        # Convert timestamps to a list of datetime objects
+        timestamps = [ts[0] for ts in timestamps]
+
+        avg_time = 0.0
+
+        # Step 2: Calculate the total elapsed time
+        total_elapsed_time = datetime.timedelta()
+        for i in range(1, len(timestamps)):
+            # Calculate the difference between consecutive timestamps
+            time_diff = timestamps[i] - timestamps[i - 1]
+
+            # If the difference exceeds the threshold, ignore it
+            if time_diff.total_seconds() > threshold:
+                # Add the average time up to this point
+                avg_time = total_elapsed_time / i
+                total_elapsed_time += avg_time
+            else:
+                # Otherwise, add the time difference to the total
+                total_elapsed_time += time_diff
+
+        # Return the total elapsed time in a human-readable format
+        if total_elapsed_time < datetime.timedelta(hours=1):
+            return f"{total_elapsed_time.total_seconds() / 60:.2f} minutes"
+        else:
+            return f"{total_elapsed_time.total_seconds() / 3600:.2f} hours"
+
     def save_report(self, data: dict, sep: str = ",") -> None:
         """Save the sstatistics in a csv file
 
@@ -380,11 +432,11 @@ class SimilarityCalculator:
 
         # Add the use_task column
         # This will be true of false
-        data['use_task'] = self.use_task
+        data["use_task"] = self.use_task
 
         # Add the total generation time to the results
-        data["EMBEDDINGS_GENERATION_TIME"] = self.get_embeddings_generation_time(
-            model=data["EMBEDDING_MODEL"]
+        data["EMBEDDINGS_GENERATION_TIME"] = self.calculate_embeddings_generation_time(
+            model=data["EMBEDDING_MODEL"], threshold=60 * 60
         )
 
         df = pd.DataFrame(data, index=[1])
@@ -436,9 +488,9 @@ class SimilarityCalculator:
         }
 
         # make sure that the returned and the original ids match
-        assert (
-            set(d1_ids) - set(self.pairs.keys()) == set()
-        ), "The was an error with the embeddings retrieval for d1"
+        assert set(d1_ids) - set(self.pairs.keys()) == set(), (
+            "The was an error with the embeddings retrieval for d1"
+        )
 
         # create an array with all embeddings
         # float32 type is required from the FAISS documentation
@@ -468,9 +520,9 @@ class SimilarityCalculator:
         }
 
         # make sure that the returned and the original ids match
-        assert (
-            set(d1_ids) - set(self.pairs.keys()) == set()
-        ), "The was an error with the embeddings retrieval for d2"
+        assert set(d1_ids) - set(self.pairs.keys()) == set(), (
+            "The was an error with the embeddings retrieval for d2"
+        )
 
         d2_vectors = np.vstack(d2_embeddings).astype("float32")
 
@@ -700,6 +752,7 @@ class SimilarityCalculator:
         metric: SimilarityMetric,
         embedding_model: Embedding_Models,
         use_task=False,
+        use_embeddings_optimal=False,
     ):
         """Calculate similarities using the requested metric and embedding model
 
@@ -720,7 +773,10 @@ class SimilarityCalculator:
 
         # Set the constant for the table name depending on the use_task flag
         if not use_task:
-            self.TABLE_NAME = "embeddings"
+            if not use_embeddings_optimal:
+                self.TABLE_NAME = "embeddings"
+            else:
+                self.TABLE_NAME = "embeddings_optimal"
         else:
             self.TABLE_NAME = "task_embeddings"
 
