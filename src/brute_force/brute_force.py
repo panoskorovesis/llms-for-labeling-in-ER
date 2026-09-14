@@ -1,6 +1,8 @@
 import datetime
 import json
+import os
 import subprocess
+import time
 from typing import Union
 
 import duckdb
@@ -36,6 +38,7 @@ class BruteForce:
         d2_records_path: str,
         ground_truth_path: str,
         verbose: bool = False,
+        use_tqdm: bool = True,
     ) -> None:
         """Initialize the class
 
@@ -67,6 +70,8 @@ class BruteForce:
         self.ground_truth = pd.read_csv(ground_truth_path)
 
         self.verbose = verbose
+        self.use_tqdm = use_tqdm
+        self.log_path = None
 
         # Initialize a duckdb connection
         self.con = self.initialize_duckdb_connection(pairs_path=pairs_path)
@@ -115,6 +120,23 @@ class BruteForce:
             print(results.stdout)
 
         print("Restart completed, will continue")
+
+    def log_progress(self, model: Models, record_count: int, start_time: float) -> None:
+        elapsed_seconds = time.monotonic() - start_time
+        records_remaining = len(self.pairs) - record_count
+        average_seconds_per_record = elapsed_seconds / record_count
+        remaining_seconds = records_remaining * average_seconds_per_record
+
+        message = (
+            f"Model {model}: processed {record_count} records. "
+            f"Elapsed: {datetime.timedelta(seconds=int(elapsed_seconds))}. "
+            f"Estimated remaining: {datetime.timedelta(seconds=int(remaining_seconds))}."
+        )
+        if self.log_path is None:
+            print(message)
+        else:
+            with open(self.log_path, "a") as log_file:
+                print(message, file=log_file)
 
     def validate_prompt(self, mode: BruteForceMode, prompt_type: PromptTypes):
         """Make sure the given prompt_type is compatible with the mode
@@ -303,7 +325,13 @@ class BruteForce:
             promt_type=PromptTypes.MATCHING_PROMPT, run_id=run_id, model=model
         )
 
-        for d1_id in tqdm(self.pairs, desc="Gathering results"):
+        start_time = time.monotonic()
+        for record_count, d1_id in enumerate(
+            tqdm(self.pairs, desc="Gathering results", disable=not self.use_tqdm),
+            start=1,
+        ):
+            if record_count % 100 == 0:
+                self.log_progress(model, record_count, start_time)
             for d2_id in self.pairs[d1_id]:
                 # If it's already processed, skip it
                 if (d1_id, d2_id) in processed_records:
@@ -384,7 +412,13 @@ class BruteForce:
             promt_type=PromptTypes.COMPARING_PROMPT, run_id=run_id, model=model
         )
 
-        for d1_id in tqdm(self.pairs, desc="Gathering results"):
+        start_time = time.monotonic()
+        for record_count, d1_id in enumerate(
+            tqdm(self.pairs, desc="Gathering results", disable=not self.use_tqdm),
+            start=1,
+        ):
+            if record_count % 100 == 0:
+                self.log_progress(model, record_count, start_time)
             # If it's already processed, skip it
             if d1_id in processed_records:
                 if self.verbose:
@@ -507,7 +541,13 @@ class BruteForce:
         )
 
         # Begin the process
-        for d1_id in tqdm(self.pairs, desc="Gathering results"):
+        start_time = time.monotonic()
+        for record_count, d1_id in enumerate(
+            tqdm(self.pairs, desc="Gathering results", disable=not self.use_tqdm),
+            start=1,
+        ):
+            if record_count % 100 == 0:
+                self.log_progress(model, record_count, start_time)
             # if d1 has already been processed continue
             if d1_id in processed_records:
                 if self.verbose:
@@ -680,6 +720,8 @@ class BruteForce:
         num_predict: int = 128,
         max_input_tokens: int = 2048,
         restart=False,
+        think: bool = True,
+        log_path: str | None = None,
     ):
         """This is the main method that executes the brute force
 
@@ -703,6 +745,11 @@ class BruteForce:
             None
         """
 
+        self.log_path = log_path
+        if self.log_path is not None:
+            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+            open(self.log_path, "w").close()
+
         # First create the LLM
         self.llm = LLM(
             model=model,
@@ -710,6 +757,7 @@ class BruteForce:
             password=self.config["ollama"]["password"],
             server_port=self.config["ollama"]["port"],
             server_url=self.config["ollama"]["url"],
+            think=think,
             verbose=self.verbose,
         )
 

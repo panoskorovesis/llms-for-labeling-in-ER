@@ -18,6 +18,7 @@ class LLM:
         max_request_tries: int = 3,
         request_timeout: int = 60,
         request_interval: int = 5,
+        think: bool = True,
         verbose: str = False,
     ):
         # The username, password are required to
@@ -31,6 +32,7 @@ class LLM:
         self.request_interval = request_interval
 
         self.server_port = server_port
+        self.think = think
 
         self.model = model
 
@@ -122,7 +124,7 @@ class LLM:
             return ValidationStatus.NO_RESPONSE, ""
 
         # If the model is DEEPSEEK_R1 </think> MUST be in the output
-        if self.model == Models.DEEPSEEK_R1 and "</think>" not in rsp["response"]:
+        if self.model == Models.DEEPSEEK_R1 and self.think and "</think>" not in rsp["response"]:
             print("</THINK> MISSING FROM OUTPUT. NUM_PREDICT MAY BE TOO SMALL!")
             return ValidationStatus.INVALID, ""
 
@@ -131,7 +133,7 @@ class LLM:
         )
 
         # Also if the model is DEEPSEEK_R1 we have to exclude the thinking tokens from the parsing
-        if self.model == Models.DEEPSEEK_R1:
+        if self.model == Models.DEEPSEEK_R1 and self.think:
             rsp["response"] = rsp["response"].lower().split("</think>")[-1].strip()
 
         # First clean the text
@@ -263,6 +265,7 @@ class LLM:
             "model": str(self.model),
             "prompt": prompt,
             "stream": False,
+            "think": self.think,
             "options": {
                 "temperature": temperature,
                 "num_predict": num_predict,
