@@ -46,6 +46,7 @@ class Embedding_Models(Enum):
     JINA_EMBEDDINGS_V5_OMNI_SMALL = 18
     KITEFISH_NANO_EM1_06B = 19
     QWEN_3_5_EMBEDDING_4B = 20
+    F2LLM_4B = 21
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -89,6 +90,8 @@ class Embedding_Models(Enum):
             return "KiteFishAI/Nano-Em1-0.6B-v2.1"
         elif self.name == "QWEN_3_5_EMBEDDING_4B":
             return "Qwen/Qwen3.5-Embedding-4B"
+        elif self.name == "F2LLM_4B":
+            return "codefuse-ai/F2LLM-4B"
 
 
 class Models(Enum):

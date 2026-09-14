@@ -124,6 +124,10 @@ class Embedder:
             Embedding_Models.NEMOTRON_3_EMBED_8B,
         }
 
+        f2ai_models = {
+            Embedding_Models.F2LLM_4B,
+        }
+
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
         # They use their own library, not sentence transformers
         baai_models = {Embedding_Models.BGE_M3}
@@ -159,13 +163,25 @@ class Embedder:
                 },
                 trust_remote_code=True,
             )
+        elif model in f2ai_models:
+            print(f"Loading F2LLM model: {str(model)}")
+            tokenizer = None
+            emb_model = SentenceTransformer(
+                str(model),
+                device=self.device,
+                model_kwargs={
+                    "torch_dtype": torch.bfloat16,
+                },
+                trust_remote_code=True,
+            )
         elif model in jina_models:
             print(f"Loading Jina model: {str(model)}")
             tokenizer = None
             emb_model = SentenceTransformer(
                 str(model),
                 device=self.device,
-                model_kwargs={"default_task": "text-matching"},
+                # model_kwargs={"default_task": "text-matching"},
+                model_kwargs={"default_task": "classification"},
                 trust_remote_code=True,
             )
         elif model in nemotron_models:
