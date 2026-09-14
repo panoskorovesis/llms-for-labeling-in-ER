@@ -41,6 +41,8 @@ class Embedding_Models(Enum):
     GTE_QWEN2 = 13
     JASPER_TOKEN_COMPRESSION = 14
     OCTEN_EMBEDDING_4B = 15
+    NEMOTRON_3_EMBED_8B = 16
+    NEMOTRON_3_EMBED_1B = 17
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -74,6 +76,10 @@ class Embedding_Models(Enum):
             return "infgrad/Jasper-Token-Compression-600M"
         elif self.name == "OCTEN_EMBEDDING_4B":
             return "Octen/Octen-Embedding-4B"
+        elif self.name == "NEMOTRON_3_EMBED_8B":
+            return "nvidia/Nemotron-3-Embed-8B-BF16"
+        elif self.name == "NEMOTRON_3_EMBED_1B":
+            return "nvidia/Nemotron-3-Embed-1B-BF16"
 
 
 class Models(Enum):
@@ -105,6 +111,9 @@ class Models(Enum):
     FALCON_3 = 10
     PHI_4 = 11
     DEEPSEEK_R1 = 12
+    GEMMA4 = 13
+    QWEN_3_5_9B = 14
+    GLM_4_6V_FLASH_10B = 15
 
     def __str__(self) -> str:
         """Return the appropriate model name
@@ -134,6 +143,12 @@ class Models(Enum):
             return "phi4:14b"
         elif self.name == "DEEPSEEK_R1":
             return "deepseek-r1:14b"
+        elif self.name == "GEMMA4":
+            return "gemma4:12b-it-qat"
+        elif self.name == "QWEN_3_5_9B":
+            return "qwen3.5:9b-q4_K_M"
+        elif self.name == "GLM_4_6V_FLASH_10B":
+            return "glm-4.6v-flash-unsloth:latest-hotfixed"
 
 
 class PromptTypes(Enum):
