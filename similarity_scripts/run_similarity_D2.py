@@ -103,6 +103,54 @@ similarity_calculator.calculate_similarities(
     metric=SimilarityMetric.EUCLIDIAN, embedding_model=Embedding_Models.BGE_M3
 )
 
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.JASPER_TOKEN_COMPRESSION,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.JASPER_TOKEN_COMPRESSION,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.OCTEN_EMBEDDING_4B,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.OCTEN_EMBEDDING_4B,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.NEMOTRON_3_EMBED_1B,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.NEMOTRON_3_EMBED_1B,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.JINA_EMBEDDINGS_V5_OMNI_SMALL,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.JINA_EMBEDDINGS_V5_OMNI_SMALL,
+    use_embeddings_optimal=True,
+)
+
 #############
 # WITH TASK #
 #############

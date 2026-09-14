@@ -107,10 +107,21 @@ class Embedder:
             Embedding_Models.SFR_EMBEDDING_MISTRAL,
             Embedding_Models.GTE_QWEN2,
             Embedding_Models.OCTEN_EMBEDDING_4B,
+            Embedding_Models.KITEFISH_NANO_EM1_06B,
+            Embedding_Models.QWEN_3_5_EMBEDDING_4B,
         }
 
         jasper_models = {
             Embedding_Models.JASPER_TOKEN_COMPRESSION,
+        }
+
+        jina_models = {
+            Embedding_Models.JINA_EMBEDDINGS_V5_OMNI_SMALL,
+        }
+
+        nemotron_models = {
+            Embedding_Models.NEMOTRON_3_EMBED_1B,
+            Embedding_Models.NEMOTRON_3_EMBED_8B,
         }
 
         # Models from Beijing Academy of Artificial Intelligence require special handling (BAAI)
@@ -129,6 +140,8 @@ class Embedder:
             # NOTE: SentenceTransformer will go to gpu by default if it's available
             # Some of our models do not fit in gpu so we have to specify the device here
             # Later the model.to() will essentially do nothing but that's ok!
+            print(f"Loading sentence transformer model: {str(model)}")
+
             emb_model = SentenceTransformer(
                 str(model),
                 device=self.device,
@@ -146,6 +159,29 @@ class Embedder:
                 },
                 trust_remote_code=True,
             )
+        elif model in jina_models:
+            print(f"Loading Jina model: {str(model)}")
+            tokenizer = None
+            emb_model = SentenceTransformer(
+                str(model),
+                device=self.device,
+                model_kwargs={"default_task": "text-matching"},
+                trust_remote_code=True,
+            )
+        elif model in nemotron_models:
+            print(f"Loading Nemotron model: {str(model)}")
+            tokenizer = None
+            emb_model = SentenceTransformer(
+                str(model),
+                device=self.device,
+                model_kwargs={
+                    "dtype": torch.bfloat16,
+                    # The model creator suggest flash but its not supported by the hardware
+                    # "attn_implementation": "flash_attention_2",
+                },
+                trust_remote_code=True,
+            )
+            emb_model.max_seq_length = 32768
         elif model in baai_models:
             tokenizer = None
             emb_model = BGEM3FlagModel(str(model), use_fp16=True)

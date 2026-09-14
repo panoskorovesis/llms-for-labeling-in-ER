@@ -43,6 +43,9 @@ class Embedding_Models(Enum):
     OCTEN_EMBEDDING_4B = 15
     NEMOTRON_3_EMBED_8B = 16
     NEMOTRON_3_EMBED_1B = 17
+    JINA_EMBEDDINGS_V5_OMNI_SMALL = 18
+    KITEFISH_NANO_EM1_06B = 19
+    QWEN_3_5_EMBEDDING_4B = 20
 
     def __str__(self) -> str:
         """Return the appropriate model name"""
@@ -80,6 +83,12 @@ class Embedding_Models(Enum):
             return "nvidia/Nemotron-3-Embed-8B-BF16"
         elif self.name == "NEMOTRON_3_EMBED_1B":
             return "nvidia/Nemotron-3-Embed-1B-BF16"
+        elif self.name == "JINA_EMBEDDINGS_V5_OMNI_SMALL":
+            return "jinaai/jina-embeddings-v5-omni-small"
+        elif self.name == "KITEFISH_NANO_EM1_06B":
+            return "KiteFishAI/Nano-Em1-0.6B-v2.1"
+        elif self.name == "QWEN_3_5_EMBEDDING_4B":
+            return "Qwen/Qwen3.5-Embedding-4B"
 
 
 class Models(Enum):
