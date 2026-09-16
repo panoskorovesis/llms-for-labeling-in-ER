@@ -109,6 +109,8 @@ class Embedder:
             Embedding_Models.OCTEN_EMBEDDING_4B,
             Embedding_Models.KITEFISH_NANO_EM1_06B,
             Embedding_Models.QWEN_3_5_EMBEDDING_4B,
+            Embedding_Models.GIGA_CHAT_3B,
+            Embedding_Models.EMBEDDING_GEMMA,
         }
 
         jasper_models = {
@@ -180,8 +182,8 @@ class Embedder:
             emb_model = SentenceTransformer(
                 str(model),
                 device=self.device,
-                # model_kwargs={"default_task": "text-matching"},
-                model_kwargs={"default_task": "classification"},
+                model_kwargs={"default_task": "text-matching"},
+                # model_kwargs={"default_task": "classification"},
                 trust_remote_code=True,
             )
         elif model in nemotron_models:
@@ -600,6 +602,11 @@ class Embedder:
             embeddings = self.model.encode(
                 [text],
                 max_length=8192,  # This is the proposed lengh. We can make it smaller if we want
+            )
+        elif self.e_model == Embedding_Models.KITEFISH_NANO_EM1_06B:
+            instruction = "Instruct: Retrieve semantically similar text\nQuery: "
+            embeddings = self.model.encode(
+                [instruction + text],
             )
         else:
             # NOTE: Here the input can either be str or a list

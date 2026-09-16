@@ -96,11 +96,15 @@ similarity_calculator.calculate_similarities(
 )
 
 similarity_calculator.calculate_similarities(
-    metric=SimilarityMetric.COSINE, embedding_model=Embedding_Models.BGE_M3
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.BGE_M3,
+    use_embeddings_optimal=True,
 )
 
 similarity_calculator.calculate_similarities(
-    metric=SimilarityMetric.EUCLIDIAN, embedding_model=Embedding_Models.BGE_M3
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.BGE_M3,
+    use_embeddings_optimal=True,
 )
 
 similarity_calculator.calculate_similarities(
@@ -148,6 +152,18 @@ similarity_calculator.calculate_similarities(
 similarity_calculator.calculate_similarities(
     metric=SimilarityMetric.EUCLIDIAN,
     embedding_model=Embedding_Models.JINA_EMBEDDINGS_V5_OMNI_SMALL,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.COSINE,
+    embedding_model=Embedding_Models.QWEN_3_5_EMBEDDING_4B,
+    use_embeddings_optimal=True,
+)
+
+similarity_calculator.calculate_similarities(
+    metric=SimilarityMetric.EUCLIDIAN,
+    embedding_model=Embedding_Models.QWEN_3_5_EMBEDDING_4B,
     use_embeddings_optimal=True,
 )
 
